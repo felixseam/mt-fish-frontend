@@ -1,11 +1,10 @@
 import {
-
   endGameSession,
   enterGameSession,
   saveGameSessionSnapshot,
   type SessionPayload,
 } from "~/composables/service/sessionApi";
-import {createBet} from "~/composables/service/betApi";
+import { createBet } from "~/composables/service/betApi";
 
 type SnapshotProducer = () => {
   total_elapsed_seconds: string;
@@ -68,7 +67,8 @@ export function useFishSessionRuntime() {
         runtime_state_json: payload.runtime_state_json ?? {},
         device_meta_json: payload.device_meta_json ?? {},
       });
-      const responsePayload = (result?.data.value as any)?.data ?? result?.data.value;
+      const responsePayload =
+        (result?.data.value as any)?.data ?? result?.data.value;
       session.value = responsePayload.session;
       snapshotVersion.value = responsePayload.session.snapshot_version;
       snapshotConsecutiveFailures = 0;
@@ -136,6 +136,23 @@ export function useFishSessionRuntime() {
     });
   }
 
+  function pauseSnapshotLoop() {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  function resumeSnapshotLoop(
+    getPayload: SnapshotProducer,
+    options?: {
+      maxFailuresBeforeSyncLost?: number;
+      onSyncLost?: () => void;
+    },
+  ) {
+    startSnapshotLoop(getPayload, options);
+  }
+
   return {
     session,
     snapshotVersion,
@@ -147,5 +164,7 @@ export function useFishSessionRuntime() {
     startSnapshotLoop,
     stopAndClose,
     fireBet,
+    pauseSnapshotLoop,
+    resumeSnapshotLoop,
   };
 }

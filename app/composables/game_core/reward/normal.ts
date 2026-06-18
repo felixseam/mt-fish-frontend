@@ -7,7 +7,7 @@ import {
   ODD_FONT_URL,
 } from "~/composables/game_core/assets/useFishAssetPreload";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// Constants
 const COIN_FONT_NAME = "fnt_coin";
 
 const COIN_FRAMES = [
@@ -23,7 +23,7 @@ const COIN_FRAMES = [
   "ef_coin0_only0009.png",
 ] as const;
 
-// ── Timing ────────────────────────────────────────────────────────────────────
+// Timing
 const HOLD_RATIO = 0.55;
 const POP_SINGLE_MS = 300;
 const POP_MULTI_MS = 280;
@@ -34,7 +34,7 @@ const FLY_DURATION = 550;
 const STAGGER_DELAY = 80;
 const FADE_MS = 300;
 
-// ── Easing ────────────────────────────────────────────────────────────────────
+// Easing
 function easeOut(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
@@ -47,18 +47,136 @@ function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
-// ── Public types ──────────────────────────────────────────────────────────────
+// Public types
 export type RewardEffectOptions = {
   layer: PIXI.Container;
   x: number;
   y: number;
   amount: number;
+  pattern?: SpawnPattern;
   durationMs?: number;
   boxTarget?: { x: number; y: number };
   onComplete?: () => void;
 };
 
-// ── Texture getter ────────────────────────────────────────────────────────────
+export type SpawnPattern =
+  | "single"
+  | "ring"
+  | "filled_circle"
+  | "star"
+  | "triangle"
+  | "hexagon"
+  | "diamond"
+  | "cross";
+
+// Spawn Position
+type SpawnPos = { x: number; y: number; delay?: number };
+
+function getRingPositions(): SpawnPos[] {
+  const R = 30;
+  return [
+    { x: 0, y: -R },
+    { x: R, y: 0 },
+    { x: 0, y: R },
+    { x: -R, y: 0 },
+  ];
+}
+
+function getFilledCirclePositions(): SpawnPos[] {
+  const pts: SpawnPos[] = [{ x: 0, y: 0 }];
+  for (let ring = 1; ring <= 2; ring++) {
+    const n = ring * 6;
+    const radius = ring * 28;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      pts.push({
+        x: Math.cos(a) * radius,
+        y: Math.sin(a) * radius,
+        delay: ring * POP_STAGGER_MS,
+      });
+    }
+  }
+  return pts;
+}
+
+function getStarPositions(): SpawnPos[] {
+  const POINTS = 5;
+  const R_OUTER = 60;
+  const R_INNER = 26;
+  const pts: SpawnPos[] = [];
+  for (let i = 0; i < POINTS * 2; i++) {
+    const a = (i / (POINTS * 2)) * Math.PI * 2 - Math.PI / 2;
+    const r = i % 2 === 0 ? R_OUTER : R_INNER;
+    pts.push({
+      x: Math.cos(a) * r,
+      y: Math.sin(a) * r,
+      delay: i * POP_STAGGER_MS,
+    });
+  }
+  return pts;
+}
+
+function getTrianglePositions(): SpawnPos[] {
+  const pts: SpawnPos[] = [];
+  const rows = 4;
+  for (let r = 0; r < rows; r++) {
+    const count = r + 1;
+    const yOff = (r - (rows - 1) / 2) * 28;
+    for (let c = 0; c < count; c++) {
+      const xOff = (c - (count - 1) / 2) * 32;
+      pts.push({ x: xOff, y: yOff, delay: r * POP_STAGGER_MS });
+    }
+  }
+  return pts;
+}
+
+function getHexagonPositions(): SpawnPos[] {
+  const pts: SpawnPos[] = [{ x: 0, y: 0, delay: 0 }];
+  const R1 = 30,
+    R2 = 60;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 - Math.PI / 6;
+    pts.push({
+      x: Math.cos(a) * R1,
+      y: Math.sin(a) * R1,
+      delay: POP_STAGGER_MS,
+    });
+  }
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 - Math.PI / 6;
+    pts.push({
+      x: Math.cos(a) * R2,
+      y: Math.sin(a) * R2,
+      delay: POP_STAGGER_MS * 2,
+    });
+  }
+  return pts;
+}
+
+function getDiamondPositions(): SpawnPos[] {
+  const pts: SpawnPos[] = [];
+  for (const r of [-2, -1, 0, 1, 2]) {
+    const span = 2 - Math.abs(r);
+    for (let c = -span; c <= span; c++) {
+      pts.push({ x: c * 26, y: r * 22, delay: Math.abs(r) * POP_STAGGER_MS });
+    }
+  }
+  return pts;
+}
+
+function getCrossPositions(): SpawnPos[] {
+  const pts: SpawnPos[] = [];
+  const ARM = 3,
+    STEP = 30;
+  for (let i = -ARM; i <= ARM; i++) {
+    pts.push({ x: i * STEP, y: 0, delay: Math.abs(i) * POP_STAGGER_MS });
+    if (i !== 0)
+      pts.push({ x: 0, y: i * STEP, delay: Math.abs(i) * POP_STAGGER_MS });
+  }
+  return pts;
+}
+
+// Texture getter
 function getCoinTextures(): PIXI.Texture[] {
   const { getAtlasTexture } = useFishAssetPreload();
   return COIN_FRAMES.map((f) => getAtlasTexture(COIN_ATLAS_URL, f)).filter(
@@ -66,7 +184,7 @@ function getCoinTextures(): PIXI.Texture[] {
   );
 }
 
-// ── Amount label ──────────────────────────────────────────────────────────────
+// Amount label
 function makeAmountLabel(amount: number): PIXI.BitmapText {
   const label = new PIXI.BitmapText(`+${amount.toLocaleString()}`, {
     fontName: COIN_FONT_NAME,
@@ -77,13 +195,14 @@ function makeAmountLabel(amount: number): PIXI.BitmapText {
   return label;
 }
 
-// ── Public entry point ────────────────────────────────────────────────────────
+// Public entry point
 export function showRewardEffect(options: RewardEffectOptions): void {
   const {
     layer,
     x,
     y,
     amount,
+    pattern = "single",
     durationMs = 1800,
     boxTarget,
     onComplete,
@@ -97,7 +216,7 @@ export function showRewardEffect(options: RewardEffectOptions): void {
     return;
   }
 
-  if (amount <= 50) {
+  if (pattern === "single") {
     spawnSingleCoin(
       layer,
       x,
@@ -109,12 +228,28 @@ export function showRewardEffect(options: RewardEffectOptions): void {
       onComplete,
     );
   } else {
+    const positions =
+      pattern === "ring"
+        ? getRingPositions()
+        : pattern === "filled_circle"
+          ? getFilledCirclePositions()
+          : pattern === "star"
+            ? getStarPositions()
+            : pattern === "triangle"
+              ? getTrianglePositions()
+              : pattern === "hexagon"
+                ? getHexagonPositions()
+                : pattern === "diamond"
+                  ? getDiamondPositions()
+                  : getCrossPositions();
+
     spawnMultiCoin(
       layer,
       x,
       y,
       textures,
       amount,
+      positions,
       durationMs,
       boxTarget,
       onComplete,
@@ -122,7 +257,7 @@ export function showRewardEffect(options: RewardEffectOptions): void {
   }
 }
 
-// ── Single coin (amount <= 50) ────────────────────────────────────────────────
+// Single coin (amount <= 50)
 function spawnSingleCoin(
   layer: PIXI.Container,
   x: number,
@@ -134,7 +269,7 @@ function spawnSingleCoin(
   onComplete?: () => void,
 ): void {
   const root = new PIXI.Container();
-  (root as any).__isRewardEffect = true;  
+  (root as any).__isRewardEffect = true;
   root.zIndex = 1000;
   root.position.set(x, y);
   layer.addChild(root);
@@ -171,35 +306,28 @@ function spawnSingleCoin(
   animateReward(root, [coin], label, durationMs, boxTarget, layer, onComplete);
 }
 
-// ── Four coins in circle (amount > 50) ───────────────────────────────────────
+// Four coins in circle (amount > 50)
 function spawnMultiCoin(
   layer: PIXI.Container,
   x: number,
   y: number,
   textures: PIXI.Texture[],
   amount: number,
+  positions: SpawnPos[], // ← now passed in
   durationMs: number,
   boxTarget?: { x: number; y: number },
   onComplete?: () => void,
 ): void {
   const root = new PIXI.Container();
-  (root as any).__isRewardEffect = true; 
+  (root as any).__isRewardEffect = true;
   root.zIndex = 1000;
   root.position.set(x, y);
   layer.addChild(root);
 
-  const RADIUS = 30;
-  const POSITIONS = [
-    { x: 0, y: -RADIUS },
-    { x: RADIUS, y: 0 },
-    { x: 0, y: RADIUS },
-    { x: -RADIUS, y: 0 },
-  ] as const;
-
-  const coins = POSITIONS.map((pos, i) => {
+  const coins = positions.map((pos, i) => {
     const coin = new PIXI.AnimatedSprite(textures);
     coin.anchor.set(0.5);
-    coin.currentFrame = Math.floor((i / POSITIONS.length) * textures.length);
+    coin.currentFrame = Math.floor((i / positions.length) * textures.length);
     coin.animationSpeed = 0.45;
     coin.loop = true;
     coin.scale.set(0);
@@ -207,18 +335,18 @@ function spawnMultiCoin(
     coin.position.set(pos.x, pos.y);
     coin.play();
     root.addChild(coin);
-    return coin;
+    return { coin, delay: pos.delay ?? i * POP_STAGGER_MS };
   });
 
+  const labelY = -Math.max(...positions.map((p) => Math.abs(p.y))) - 52;
   const label = makeAmountLabel(amount);
-  label.position.set(0, -RADIUS - 52);
+  label.position.set(0, labelY);
   label.alpha = 0;
   label.scale.set(0.3);
   root.addChild(label);
 
-  // Staggered pop-in
-  coins.forEach((coin, i) => {
-    const delay = i * POP_STAGGER_MS;
+  // Staggered pop-in using per-coin delay
+  coins.forEach(({ coin, delay }) => {
     let elapsed = 0;
     const onPop = () => {
       if (coin.destroyed) {
@@ -234,10 +362,18 @@ function spawnMultiCoin(
     PIXI.Ticker.shared.add(onPop);
   });
 
-  animateReward(root, coins, label, durationMs, boxTarget, layer, onComplete);
+  animateReward(
+    root,
+    coins.map((c) => c.coin),
+    label,
+    durationMs,
+    boxTarget,
+    layer,
+    onComplete,
+  );
 }
 
-// ── Shared: float up → hold → detach → fly/fade ───────────────────────────────
+// Shared: float up → hold → detach → fly/fade
 function animateReward(
   root: PIXI.Container,
   coins: PIXI.AnimatedSprite[],
@@ -306,7 +442,7 @@ function animateReward(
   PIXI.Ticker.shared.add(onMain);
 }
 
-// ── Fly coins to coin box (bezier arc) ───────────────────────────────────────
+// Fly coins to coin box (bezier arc)
 function flyCoinsToBox(
   coins: PIXI.AnimatedSprite[],
   target: { x: number; y: number },
@@ -363,7 +499,7 @@ function flyCoinsToBox(
   });
 }
 
-// ── Fallback: fade coins out ──────────────────────────────────────────────────
+// Fallback: fade coins out
 function fadeOutCoins(
   coins: PIXI.AnimatedSprite[],
   onComplete?: () => void,

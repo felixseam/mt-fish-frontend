@@ -115,6 +115,8 @@ export function useFishGameplayScene() {
   let playerProfileUi: Awaited<
     ReturnType<typeof createPlayerProfileUi>
   > | null = null;
+  let pendingWhilePaused: Array<() => void> = [];
+  let onSessionSyncLostHandler: (() => void) | null = null;
 
   // Add at the top level of useFishGameplayScene(), alongside other let variables:
   let debugRect: PIXI.Graphics | null = null;
@@ -417,12 +419,12 @@ export function useFishGameplayScene() {
         onHit: () => flashFishHit(child),
         fishData: fishData
           ? {
-            kill_rate_modifier: fishData.kill_rate_modifier,
-            id: fishData.id,
-            min_reward_odd: fishData.min_odd,
-            max_reward_odd: fishData.max_odd,
-            fish_type_name: fishData.fish_type_name
-          }
+              kill_rate_modifier: fishData.kill_rate_modifier,
+              id: fishData.id,
+              min_reward_odd: fishData.min_odd,
+              max_reward_odd: fishData.max_odd,
+              fish_type_name: fishData.fish_type_name,
+            }
           : null,
       });
     }
@@ -615,6 +617,40 @@ export function useFishGameplayScene() {
     isGamePausedByFocus = false;
     contextMachine?.setPaused(false);
     pixiApp.ticker.start();
+
+    sessionRuntime.resumeSnapshotLoop(
+      () => ({
+        total_elapsed_seconds: getElapsedSecondsString(),
+        current_context_index:
+          contextMachine?.getRuntimeState().current_context_index ?? null,
+        current_group_id:
+          contextMachine?.getRuntimeState().current_group_id ?? null,
+        current_scene_id:
+          contextMachine?.getRuntimeState().current_scene_id ??
+          currentSceneId.value,
+        boss_scene_active:
+          contextMachine?.getRuntimeState().boss_scene_active ?? false,
+        boss_scene_lock_id:
+          contextMachine?.getRuntimeState().boss_scene_lock_id ?? "",
+        spawn_cursor: contextMachine?.getRuntimeState().spawn_cursor ?? 0,
+        runtime_state_json: contextMachine?.getRuntimeState() ?? {},
+        device_meta_json: {},
+      }),
+      {
+        maxFailuresBeforeSyncLost: 3,
+        onSyncLost: () => {
+          sessionSyncLost = true;
+          onSessionSyncLostHandler?.(); // ← no more scope error
+        },
+      },
+    );
+
+    if (pendingWhilePaused.length > 0) {
+      const pending = pendingWhilePaused.splice(0);
+      setTimeout(() => {
+        for (const flush of pending) flush();
+      }, 50);
+    }
   }
 
   function renderScene(
@@ -728,6 +764,7 @@ export function useFishGameplayScene() {
     },
   ) {
     avatarClickHandler = options?.onAvatarClick ?? null;
+    onSessionSyncLostHandler = options?.onSessionSyncLost ?? null;
     menuHandlers = {
       onMute: options?.onMute,
       onInfo: options?.onInfo,
@@ -742,20 +779,17 @@ export function useFishGameplayScene() {
       if (!pixiApp) return;
       if (paused) {
         if (isGamePausedByFocus) return;
-        isGamePausedByFocus = true;
+        isGamePausedByFocus = true; // ← set BEFORE ticker stop
         contextMachine?.setPaused(true);
         pixiApp.ticker.stop();
-
+        sessionRuntime.pauseSnapshotLoop();
         pauseReloadTimer = setTimeout(() => {
           pauseReloadTimer = null;
-          // isGamePausedDialogOpen.value = false;  ← DELETE this line, it's Vue state
           options?.onPauseTooLong?.();
         }, PAUSE_RELOAD_THRESHOLD_MS);
-
         options?.onPause?.();
         return;
       }
-      // resuming handled by resumeGame() only
     }
 
     // ── Fetch member info ─────────────────────────────────────────────────
@@ -847,20 +881,29 @@ export function useFishGameplayScene() {
           const jackpotReward =
             response?.result.reward.jackpot_reward.payout_amount;
 
-          console.log("===========================================", isReward)
+          console.log("===========================================", isReward);
 
           if (isKill && target.display) {
             contextMachine?.playKillAnimationForDisplay(target.display);
           }
 
-          return {
-            isKill: isKill,
-            isReward: isReward,
-            isJackpot: isJackpot,
+          const result = {
+            isKill,
+            isReward,
+            isJackpot,
             killReward: Math.max(0, Math.round(Number(killReward ?? 0))),
             reward: Math.max(0, Math.round(Number(reward ?? 0))),
             jackpotReward: Math.max(0, Math.round(Number(jackpotReward ?? 0))),
           };
+
+          // ── If paused, defer reward effects until resume ───────────────────
+          if (isGamePausedByFocus) {
+            return new Promise((resolve) => {
+              pendingWhilePaused.push(() => resolve(result));
+            });
+          }
+
+          return result;
         } catch (err) {
           console.error("[session] fireBet failed", err);
           return null;
@@ -968,7 +1011,7 @@ export function useFishGameplayScene() {
         maxFailuresBeforeSyncLost: 3,
         onSyncLost: () => {
           sessionSyncLost = true;
-          options?.onSessionSyncLost?.();
+          onSessionSyncLostHandler?.();
         },
       },
     );
@@ -1006,6 +1049,7 @@ export function useFishGameplayScene() {
   }
 
   function destroy() {
+    pendingWhilePaused = [];
     if (pauseReloadTimer) {
       clearTimeout(pauseReloadTimer);
       pauseReloadTimer = null;
@@ -1095,7 +1139,7 @@ export function useFishGameplayScene() {
     switchSceneById,
     setPlayerAvatar: (path: string) => playerProfileUi?.setAvatar(path),
     setPlayerUsername: (name: string) => playerProfileUi?.setUsername(name),
-    setPlayerCoins: (_amount: number) => { },
+    setPlayerCoins: (_amount: number) => {},
     isSessionSyncLost: () => sessionSyncLost,
     resumeGame,
   };

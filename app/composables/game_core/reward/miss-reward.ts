@@ -12,10 +12,10 @@ import {
   type FishDisplayHandle,
 } from "../fish/useFishRendererFactory";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+//  Constants
 const ODD_FONT_NAME = "fnt_odd";
 
-// ── Atlas frame names ─────────────────────────────────────────────────────────
+//  Atlas frame names
 const LIGHT_FRAMES = [
   "lightreward01.png",
   "lightreward02.png",
@@ -52,8 +52,9 @@ const GOLDEN_FRAME = "rewardcolorbg2_out.png";
 const RGB_BG_FRAME = "rewardcolorbg3_02.png";
 const CIRCLE_FRAME = "rewardcolorbg.png";
 const BANNER_FRAME = "rewardnamebg.png";
+const REWARD_PANEL_SCALE = 0.6;
 
-// ── Easing ────────────────────────────────────────────────────────────────────
+//  Easing
 function easeOutBack(t: number): number {
   const c1 = 1.70158,
     c3 = c1 + 1;
@@ -68,7 +69,7 @@ function easeInBack(t: number): number {
   return c3 * t * t * t - c1 * t * t;
 }
 
-// ── Public types ──────────────────────────────────────────────────────────────
+//  Public types
 export type FishMissRewardOptions = {
   layer: PIXI.Container;
   x: number;
@@ -82,11 +83,11 @@ export type FishMissRewardOptions = {
   onComplete?: () => void;
 };
 
-// ── Internal helper types ─────────────────────────────────────────────────────
+//  Internal helper types
 type GetAtlasTex = (atlasUrl: string, frame: string) => PIXI.Texture;
 type GetLocalTex = (lang: LocalizeLanguage, frame: string) => PIXI.Texture;
 
-// ── Step 1: Explosion at fish position ────────────────────────────────────────
+//  Step 1: Explosion at fish position
 function playExplosion(
   layer: PIXI.Container,
   x: number,
@@ -130,7 +131,7 @@ function playExplosion(
   explosion.play();
 }
 
-// ── Step 2: Coin arc fly ──────────────────────────────────────────────────────
+//  Step 2: Coin arc fly
 function playCoinFly(
   layer: PIXI.Container,
   fromX: number,
@@ -180,7 +181,7 @@ function playCoinFly(
   PIXI.Ticker.shared.add(onTick);
 }
 
-// ── Step 3: Shine burst at reward position ────────────────────────────────────
+//  Step 3: Shine burst at reward position
 function playShine(
   layer: PIXI.Container,
   x: number,
@@ -224,7 +225,7 @@ function playShine(
   PIXI.Ticker.shared.add(onTick);
 }
 
-// ── Step 4: Reward panel ──────────────────────────────────────────────────────
+//  Step 4: Reward panel
 type RewardPanelOptions = {
   layer: PIXI.Container;
   rewardX: number;
@@ -268,16 +269,16 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
     return;
   }
 
-  // ── Root container ────────────────────────────────────────────────────────
+  //  Root container
   const root = new PIXI.Container();
   root.position.set(rewardX, rewardY);
-  (root as any).__isRewardEffect = true;  
+  (root as any).__isRewardEffect = true;
   root.zIndex = 9999;
   root.sortableChildren = true;
   root.scale.set(0);
   layer.addChild(root);
 
-  // ── RGB bg (z: 1) ─────────────────────────────────────────────────────────
+  //  RGB bg (z: 1)
   let rgbBg: PIXI.Sprite | null = null;
   if (rgbBgTex !== PIXI.Texture.WHITE) {
     rgbBg = new PIXI.Sprite(rgbBgTex);
@@ -288,7 +289,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
     root.addChild(rgbBg);
   }
 
-  // ── Circle bg (z: 2) ──────────────────────────────────────────────────────
+  //  Circle bg (z: 2)
   let circleBg: PIXI.Sprite | null = null;
   if (circleBgTex !== PIXI.Texture.WHITE) {
     circleBg = new PIXI.Sprite(circleBgTex);
@@ -299,7 +300,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
     root.addChild(circleBg);
   }
 
-  // ── Fish display (z: 11) ──────────────────────────────────────────────────
+  //  Fish display (z: 11)
   let fishHandle: FishDisplayHandle | null = null;
   let fishDisplay: PIXI.DisplayObject | null = null;
   let fishBaseScale = 1;
@@ -322,7 +323,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
     }
   }
 
-  // ── Golden frame (z: 4) ───────────────────────────────────────────────────
+  //  Golden frame (z: 4)
   const goldenFrame = new PIXI.Sprite(goldenFrameTex);
   goldenFrame.anchor.set(0.5);
   goldenFrame.scale.set(0);
@@ -330,7 +331,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
   goldenFrame.zIndex = 4;
   root.addChild(goldenFrame);
 
-  // ── Orbiting light balls (z: 5) ───────────────────────────────────────────
+  //  Orbiting light balls (z: 5)
   const BALL_COUNT = lightTextures.length;
   const ORBIT_RADIUS = 90;
 
@@ -349,7 +350,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
     return ball;
   });
 
-  // ── WIN + amount group (z: 14) ────────────────────────────────────────────
+  //  WIN + amount group (z: 14)
   const winAmountGroup = new PIXI.Container();
   winAmountGroup.zIndex = 14;
   winAmountGroup.scale.set(0);
@@ -381,7 +382,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
   );
   winAmountGroup.position.set(0, 40);
 
-  // ── Banner + fish name (z: 12–13) ─────────────────────────────────────────
+  //  Banner + fish name (z: 12–13)
   let banner: PIXI.Sprite | null = null;
   let nameLabel: PIXI.Text | null = null;
 
@@ -414,7 +415,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
     }
   }
 
-  // ── Ticker animation ──────────────────────────────────────────────────────
+  //  Ticker animation
   const INTRO_MS = 420;
   const EXIT_MS = 320;
   const holdMs = durationMs * 0.65;
@@ -440,7 +441,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
     const introT = Math.min(elapsed / INTRO_MS, 1);
 
     // Root pop-in
-    if (!exitStarted) root.scale.set(easeOutBack(introT));
+    if (!exitStarted) root.scale.set(easeOutBack(introT) * REWARD_PANEL_SCALE);
 
     // RGB bg — spins clockwise
     if (rgbBg && !rgbBg.destroyed) {
@@ -533,7 +534,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
 
     if (exitStarted) {
       const exitT = Math.min((elapsed - holdMs) / EXIT_MS, 1);
-      root.scale.set(Math.max(0, 1 - easeInBack(exitT)));
+      root.scale.set(Math.max(0, 1 - easeInBack(exitT))* REWARD_PANEL_SCALE);
 
       if (exitT >= 1) {
         PIXI.Ticker.shared.remove(onTick);
@@ -548,7 +549,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
   PIXI.Ticker.shared.add(onTick);
 }
 
-// ── Public entry point ────────────────────────────────────────────────────────
+//  Public entry point
 export function showFishMissRewardEffect(options: FishMissRewardOptions): void {
   const {
     layer,

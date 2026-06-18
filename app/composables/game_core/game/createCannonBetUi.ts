@@ -555,22 +555,35 @@ export async function createCannonBetUi(options?: {
                     lang: "km",
                   });
                 } else {
-                  if (amount >= 500) {
-                    showBigRewardEffect({
-                      layer: rewardLayer,
-                      x: rewardPos.x,
-                      y: rewardPos.y,
-                      amount,
-                      boxTarget: options?.getCoinBoxPosition?.(),
-                    });
-                    return;
-                  }
+                  // if (amount >= 500) {
+                  //   showBigRewardEffect({
+                  //     layer: rewardLayer,
+                  //     x: rewardPos.x,
+                  //     y: rewardPos.y,
+                  //     amount,
+                  //     boxTarget: options?.getCoinBoxPosition?.(),
+                  //   });
+                  //   return;
+                  // }
+
+                  const multiplier = bet > 0 ? amount / bet : 0;
+                  const pattern =
+                    amount <= 10
+                      ? "single"
+                      : amount <= 50
+                        ? "ring"
+                        : multiplier >= 20
+                          ? "star"
+                          : amount <= 200
+                            ? "filled_circle"
+                            : "diamond";
 
                   showRewardEffect({
                     layer: rewardLayer,
                     x: rewardPos.x,
                     y: rewardPos.y,
                     amount,
+                    pattern,
                     boxTarget: options?.getCoinBoxPosition?.(),
                   });
                 }
@@ -599,7 +612,7 @@ export async function createCannonBetUi(options?: {
                     x: rewardPos.x,
                     y: rewardPos.y,
                     amount: rewardAmount,
-                    fishId: fishTypeId, 
+                    fishId: fishTypeId,
                     fishName: fish?.fish_type_name || "Unknown",
                     rewardX: missX,
                     rewardY: missY,
