@@ -1,39 +1,34 @@
 import * as PIXI from "pixi.js";
 import { Spine } from "pixi-spine";
-import fishApiData from "~/composables/game_core/data/fishApiData.json";
 import {
   FISH_BASE_PATH,
   useFishAssetPreload,
 } from "~/composables/game_core/assets/useFishAssetPreload";
+import { useGameManifestStore } from "~/stores/gameManifestStore";
+import type { ManifestFishType } from "~/composables/service/gameManifestApi";
 
-type ApiRenderState = {
-  state_code: string;
-  prefix: string;
-  frame_array: string[];
-};
+// ── constants ─────────────────────────────────────────────────
 
-type ApiRenderFamily = {
-  render_family_name: string;
-  spine_json_path?: string | null;
-  spine_atlas_path?: string | null;
-  render_type: { type_code: string } | null;
-  render_states: ApiRenderState[];
-};
+const DIALOG_WIDTH = 860;
+const DIALOG_HEIGHT = 560;
+const CONTENT_X = 26;
+const CONTENT_Y = 92;
+const CONTENT_WIDTH = DIALOG_WIDTH - CONTENT_X * 2;
+const CONTENT_HEIGHT = DIALOG_HEIGHT - 156;
+const CARDS_PER_ROW = 4;
+const ROWS_PER_PAGE = 2;
+const CARDS_PER_PAGE = CARDS_PER_ROW * ROWS_PER_PAGE;
 
-type ApiFishType = {
-  id: number;
-  boss_name: string | null;
-  is_boss: boolean;
-  min_odd: number | null;
-  max_odd: number | null;
-  default_state_code: string;
-  scale?: number | null;
-  render_family: ApiRenderFamily | null;
-};
+const SOLO_SPINE_FAMILIES = new Set([
+  "spine_crystal_crab",
+  "spine_turtle",
+  "spine_octopus",
+  "spine_phoenix",
+  "spine_crocodile",
+  "spine_naga",
+]);
 
-type ApiRoot = {
-  fish_types: ApiFishType[];
-};
+// ── local types ───────────────────────────────────────────────
 
 type FishInfoEntry = {
   id: number;
@@ -49,94 +44,70 @@ type FishInfoEntry = {
   spineAtlasUrl?: string;
   scale: number;
   isSoloPage?: boolean;
+  internal_kind: number;
 };
 
-const DIALOG_WIDTH = 860;
-const DIALOG_HEIGHT = 560;
-const CONTENT_X = 26;
-const CONTENT_Y = 92;
-const CONTENT_WIDTH = DIALOG_WIDTH - CONTENT_X * 2;
-const CONTENT_HEIGHT = DIALOG_HEIGHT - 156;
-const CARDS_PER_ROW = 4;
-const ROWS_PER_PAGE = 2;
-const CARDS_PER_PAGE = CARDS_PER_ROW * ROWS_PER_PAGE;
-const apiRoot = fishApiData as ApiRoot;
-
-// These spine families each get their own full page, centered
-const SOLO_SPINE_FAMILIES = new Set([
-  "spine_crystal_crab",
-  "spine_turtle",
-  "spine_octopus",
-  "spine_phoenix",
-  "spine_crocodile",
-  "spine_naga",
-]);
-
-// A "page slot" is either a solo entry or a group of up to CARDS_PER_PAGE normal entries
 type PageSlot =
   | { kind: "solo"; entry: FishInfoEntry }
   | { kind: "group"; entries: FishInfoEntry[] };
 
-function sortFramesForPlayback(frames: string[]) {
-  return [...frames].sort((left, right) => {
-    const leftNums = left.match(/\d+/g)?.map(Number) ?? [];
-    const rightNums = right.match(/\d+/g)?.map(Number) ?? [];
-    const maxLen = Math.max(leftNums.length, rightNums.length);
+// ── helpers ───────────────────────────────────────────────────
 
-    for (let index = 0; index < maxLen; index += 1) {
-      const leftVal = leftNums[index] ?? 0;
-      const rightVal = rightNums[index] ?? 0;
-      if (leftVal !== rightVal) return leftVal - rightVal;
+function sortFramesForPlayback(frames: string[]): string[] {
+  return [...frames].sort((a, b) => {
+    const aNums = a.match(/\d+/g)?.map(Number) ?? [];
+    const bNums = b.match(/\d+/g)?.map(Number) ?? [];
+    const maxLen = Math.max(aNums.length, bNums.length);
+    for (let i = 0; i < maxLen; i++) {
+      const diff = (aNums[i] ?? 0) - (bNums[i] ?? 0);
+      if (diff !== 0) return diff;
     }
-
-    return left.localeCompare(right);
+    return a.localeCompare(b);
   });
 }
 
 function getAtlasUrlFromPrefix(prefix: string | null): string | null {
   if (!prefix) return null;
-  const cleanPrefix = prefix.replace(/\/+$/, "");
-  return `${FISH_BASE_PATH}/${cleanPrefix}.atlas.txt`;
+  return `${FISH_BASE_PATH}/${prefix.replace(/\/+$/, "")}.atlas.txt`;
 }
 
-function formatRewardLabel(fish: ApiFishType): string {
-  if (fish.min_odd != null && fish.max_odd != null) {
-    return fish.min_odd === fish.max_odd
-      ? `${fish.min_odd}x`
-      : `${fish.min_odd}-${fish.max_odd}x`;
-  }
-
-  if (fish.min_odd != null) return `${fish.min_odd}x`;
-  if (fish.max_odd != null) return `${fish.max_odd}x`;
+function formatRewardLabel(fish: ManifestFishType): string {
+  const min = fish.min_odd;
+  const max = fish.max_odd;
+  if (min != null && max != null) return min === max ? `${min}x` : `${min}-${max}x`;
+  if (min != null) return `${min}x`;
+  if (max != null) return `${max}x`;
   return "-";
 }
 
-function formatBossLabel(bossName: string | null, fishId: number) {
-  const raw = bossName?.trim();
-  if (!raw) return `Boss ${fishId}`;
-  return raw.charAt(0).toUpperCase() + raw.slice(1);
+function formatFishLabel(fish: ManifestFishType): string {
+  const name = fish.fish_type_name?.trim();
+  if (name) return name.charAt(0).toUpperCase() + name.slice(1);
+  return fish.is_boss
+    ? fish.boss_name?.trim()
+      ? fish.boss_name.trim()
+      : `Boss ${fish.id}`
+    : `Fish ${fish.id}`;
 }
 
-function buildFishEntries(): FishInfoEntry[] {
+// ── data building ─────────────────────────────────────────────
+
+function buildFishEntries(fishTypes: ManifestFishType[]): FishInfoEntry[] {
   const deduped = new Map<string, FishInfoEntry>();
 
-  for (const fish of apiRoot.fish_types) {
+  for (const fish of fishTypes) {
     const family = fish.render_family;
     const renderType = family?.render_type?.type_code;
     if (!family || !renderType) continue;
 
-    const label = fish.is_boss
-      ? formatBossLabel(fish.boss_name, fish.id)
-      : `Fish ${fish.id}`;
-
+    const label = formatFishLabel(fish);
     const isSoloPage =
-      renderType === "spine" &&
-      SOLO_SPINE_FAMILIES.has(family.render_family_name);
+      renderType === "spine" && SOLO_SPINE_FAMILIES.has(family.render_family_name);
 
     if (renderType === "atlas_sprite_anim") {
       const targetStateCode = fish.default_state_code || "move";
       const targetState =
-        family.render_states.find((state) => state.state_code === targetStateCode) ??
+        family.render_states.find((s) => s.state_code === targetStateCode) ??
         family.render_states[0];
 
       if (!targetState?.prefix || !targetState.frame_array?.length) continue;
@@ -160,6 +131,7 @@ function buildFishEntries(): FishInfoEntry[] {
         frames,
         scale: fish.scale ?? 1,
         isSoloPage: false,
+        internal_kind: fish.internal_kind,
       });
       continue;
     }
@@ -184,11 +156,12 @@ function buildFishEntries(): FishInfoEntry[] {
         spineAtlasUrl,
         scale: fish.scale ?? 1,
         isSoloPage,
+        internal_kind: fish.internal_kind,
       });
     }
   }
 
-  return [...deduped.values()].sort((left, right) => left.id - right.id);
+  return [...deduped.values()].sort((a, b) => a.internal_kind - b.internal_kind);
 }
 
 function buildPageSlots(entries: FishInfoEntry[]): PageSlot[] {
@@ -215,48 +188,40 @@ function buildPageSlots(entries: FishInfoEntry[]): PageSlot[] {
   return slots;
 }
 
+// ── main export ───────────────────────────────────────────────
+
 export async function createFishInfoDialog() {
+  const manifestStore = useGameManifestStore();
   const { preloadAtlas, getAtlasTexture } = useFishAssetPreload();
-  const entries = buildFishEntries();
+
+  const entries = buildFishEntries(manifestStore.fishTypes);
+
   const uniqueAtlasUrls = [
     ...new Set(
       entries
-        .map((entry) => entry.atlasUrl)
-        .filter((atlasUrl): atlasUrl is string => typeof atlasUrl === "string"),
+        .map((e) => e.atlasUrl)
+        .filter((u): u is string => typeof u === "string"),
     ),
   ];
+
   const uniqueSpines = [
     ...new Map(
       entries
-        .filter(
-          (entry) =>
-            entry.previewKind === "spine" &&
-            entry.spineJsonUrl &&
-            entry.spineAtlasUrl,
-        )
-        .map((entry) => [
-          entry.spineJsonUrl!,
-          {
-            json: entry.spineJsonUrl!,
-            atlas: entry.spineAtlasUrl!,
-          },
-        ]),
+        .filter((e) => e.previewKind === "spine" && e.spineJsonUrl && e.spineAtlasUrl)
+        .map((e) => [e.spineJsonUrl!, { json: e.spineJsonUrl!, atlas: e.spineAtlasUrl! }]),
     ).values(),
   ];
 
-  await Promise.all(uniqueAtlasUrls.map((atlasUrl) => preloadAtlas(atlasUrl)));
+  await Promise.all(uniqueAtlasUrls.map((url) => preloadAtlas(url)));
   await Promise.all(
-    uniqueSpines.map((manifest) =>
-      PIXI.Assets.load({
-        src: manifest.json,
-        data: {
-          spineAtlasFile: manifest.atlas,
-        },
-      }),
+    uniqueSpines.map((m) =>
+      PIXI.Assets.load({ src: m.json, data: { spineAtlasFile: m.atlas } }),
     ),
   );
 
   const pageSlots = buildPageSlots(entries);
+
+  // ── PIXI scene setup ──────────────────────────────────────────
 
   const container = new PIXI.Container();
   container.visible = false;
@@ -289,11 +254,12 @@ export async function createFishInfoDialog() {
   innerBorder.drawRoundedRect(10, 10, DIALOG_WIDTH - 20, DIALOG_HEIGHT - 20, 22);
   panel.addChild(innerBorder);
 
-  const title = new PIXI.Text("Special Fish", {
+  const title = new PIXI.Text("Fish Encyclopedia", {
     fill: 0xffffff,
     fontFamily: "Poppins",
     fontSize: 30,
     fontWeight: "700",
+    align: "center",
   });
   title.anchor.set(0.5, 0);
   title.position.set(DIALOG_WIDTH / 2, 20);
@@ -341,29 +307,28 @@ export async function createFishInfoDialog() {
   panel.addChild(pageIndicator);
 
   function makeNavButton(label: string, x: number, onClick: () => void) {
-    const button = new PIXI.Container();
-    button.position.set(x, DIALOG_HEIGHT - 34);
-    button.eventMode = "static";
-    button.cursor = "pointer";
+    const btn = new PIXI.Container();
+    btn.position.set(x, DIALOG_HEIGHT - 34);
+    btn.eventMode = "static";
+    btn.cursor = "pointer";
 
-    const buttonBg = new PIXI.Graphics();
-    buttonBg.lineStyle(2, 0x46d3ff, 0.65);
-    buttonBg.beginFill(0x0d3a57, 1);
-    buttonBg.drawRoundedRect(-26, -18, 52, 36, 10);
-    buttonBg.endFill();
-    button.addChild(buttonBg);
+    const bg = new PIXI.Graphics();
+    bg.lineStyle(2, 0x46d3ff, 0.65);
+    bg.beginFill(0x0d3a57, 1);
+    bg.drawRoundedRect(-26, -18, 52, 36, 10);
+    bg.endFill();
+    btn.addChild(bg);
 
-    const buttonLabel = new PIXI.Text(label, {
+    const lbl = new PIXI.Text(label, {
       fill: 0xffffff,
       fontFamily: "Poppins",
       fontSize: 20,
       fontWeight: "700",
     });
-    buttonLabel.anchor.set(0.5);
-    button.addChild(buttonLabel);
-
-    button.on("pointertap", onClick);
-    return button;
+    lbl.anchor.set(0.5);
+    btn.addChild(lbl);
+    btn.on("pointertap", onClick);
+    return btn;
   }
 
   const prevButton = makeNavButton("<", DIALOG_WIDTH / 2 - 90, () => goToPage(currentPage - 1));
@@ -371,27 +336,25 @@ export async function createFishInfoDialog() {
   panel.addChild(prevButton);
   panel.addChild(nextButton);
 
+  // ── preview helpers ───────────────────────────────────────────
+
   function clearLivePreviews() {
-    for (const preview of livePreviews) {
-      if (preview instanceof PIXI.AnimatedSprite) {
-        preview.stop();
-      }
-      preview.destroy();
+    for (const p of livePreviews) {
+      if (p instanceof PIXI.AnimatedSprite) p.stop();
+      p.destroy();
     }
     livePreviews.length = 0;
   }
 
   function buildPlaceholderPreview() {
-    const placeholder = new PIXI.Graphics();
-    placeholder.beginFill(0x12344a, 1);
-    placeholder.drawRoundedRect(-44, -44, 88, 88, 16);
-    placeholder.endFill();
-    placeholder.lineStyle(2, 0x46d3ff, 0.45);
-    placeholder.moveTo(-22, -22);
-    placeholder.lineTo(22, 22);
-    placeholder.moveTo(22, -22);
-    placeholder.lineTo(-22, 22);
-    return placeholder;
+    const g = new PIXI.Graphics();
+    g.beginFill(0x12344a, 1);
+    g.drawRoundedRect(-44, -44, 88, 88, 16);
+    g.endFill();
+    g.lineStyle(2, 0x46d3ff, 0.45);
+    g.moveTo(-22, -22); g.lineTo(22, 22);
+    g.moveTo(22, -22);  g.lineTo(-22, 22);
+    return g;
   }
 
   function fitPreviewToCard(
@@ -400,49 +363,36 @@ export async function createFishInfoDialog() {
     cardHeight: number,
     scaleBoost = 1,
   ) {
-    const bounds = preview.getLocalBounds();
-    const sourceWidth = Math.max(bounds.width, 1);
-    const sourceHeight = Math.max(bounds.height, 1);
-    const maxWidth = cardWidth * 0.6;
-    const maxHeight = cardHeight * 0.38;
-    const scale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight, 1);
-
+    const b = preview.getLocalBounds();
+    const scale =
+      Math.min((cardWidth * 0.6) / Math.max(b.width, 1), (cardHeight * 0.38) / Math.max(b.height, 1), 1);
     preview.scale.set(scale * scaleBoost);
     preview.position.set(
-      (cardWidth - 12) / 2 - (bounds.x + bounds.width / 2) * preview.scale.x,
-      86 - (bounds.y + bounds.height / 2) * preview.scale.y,
+      (cardWidth - 12) / 2 - (b.x + b.width / 2) * preview.scale.x,
+      86 - (b.y + b.height / 2) * preview.scale.y,
     );
   }
 
-  // Fit a solo spine to fill most of the content area, centered
-  function fitPreviewSolo(
-    preview: PIXI.DisplayObject,
-    scaleBoost = 1,
-  ) {
-    const bounds = preview.getLocalBounds();
-    const sourceWidth = Math.max(bounds.width, 1);
-    const sourceHeight = Math.max(bounds.height, 1);
-    const maxWidth = CONTENT_WIDTH * 0.55;
-    const maxHeight = CONTENT_HEIGHT * 0.62;
-    const scale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight, 1);
-
+  function fitPreviewSolo(preview: PIXI.DisplayObject, scaleBoost = 1) {
+    const b = preview.getLocalBounds();
+    const scale = Math.min(
+      (CONTENT_WIDTH * 0.55) / Math.max(b.width, 1),
+      (CONTENT_HEIGHT * 0.62) / Math.max(b.height, 1),
+      1,
+    );
     preview.scale.set(scale * scaleBoost);
-    // Center horizontally in content area; vertically leave room for labels below
     preview.position.set(
-      CONTENT_WIDTH / 2 - (bounds.x + bounds.width / 2) * preview.scale.x,
-      CONTENT_HEIGHT * 0.42 - (bounds.y + bounds.height / 2) * preview.scale.y,
+      CONTENT_WIDTH / 2 - (b.x + b.width / 2) * preview.scale.x,
+      CONTENT_HEIGHT * 0.42 - (b.y + b.height / 2) * preview.scale.y,
     );
   }
 
   function buildSpinePreview(entry: FishInfoEntry): PIXI.DisplayObject {
-    const spineResource = entry.spineJsonUrl
+    const resource = entry.spineJsonUrl
       ? (PIXI.Assets.get(entry.spineJsonUrl) as { spineData?: unknown } | undefined)
       : undefined;
-    const spineData = spineResource?.spineData ?? spineResource;
-
-    if (!spineData || typeof spineData !== "object") {
-      return buildPlaceholderPreview();
-    }
+    const spineData = resource?.spineData ?? resource;
+    if (!spineData || typeof spineData !== "object") return buildPlaceholderPreview();
 
     const spine = new Spine(spineData as never);
     const anim = entry.stateCode || "run";
@@ -460,9 +410,8 @@ export async function createFishInfoDialog() {
 
   function buildAtlasPreview(entry: FishInfoEntry): PIXI.DisplayObject {
     const textures = (entry.frames ?? [])
-      .map((frame) => getAtlasTexture(entry.atlasUrl!, frame))
-      .filter((texture) => texture !== PIXI.Texture.WHITE);
-
+      .map((f) => getAtlasTexture(entry.atlasUrl!, f))
+      .filter((t) => t !== PIXI.Texture.WHITE);
     if (!textures.length) return buildPlaceholderPreview();
 
     const sprite = new PIXI.AnimatedSprite(textures);
@@ -474,15 +423,7 @@ export async function createFishInfoDialog() {
     return sprite;
   }
 
-  function buildPreviewSprite(entry: FishInfoEntry, cardWidth: number, cardHeight: number) {
-    const preview =
-      entry.previewKind === "spine"
-        ? buildSpinePreview(entry)
-        : buildAtlasPreview(entry);
-
-    fitPreviewToCard(preview, cardWidth, cardHeight, entry.scale);
-    return preview;
-  }
+  // ── card builders ─────────────────────────────────────────────
 
   function buildCard(entry: FishInfoEntry, index: number) {
     const cardWidth = (CONTENT_WIDTH - 24) / CARDS_PER_ROW;
@@ -490,8 +431,12 @@ export async function createFishInfoDialog() {
     const col = index % CARDS_PER_ROW;
     const row = Math.floor(index / CARDS_PER_ROW);
 
+    // ── center the grid horizontally within CONTENT_WIDTH ──
+    const totalGridWidth = CARDS_PER_ROW * cardWidth;
+    const gridOffsetX = (CONTENT_WIDTH - totalGridWidth) / 2;
+
     const card = new PIXI.Container();
-    card.position.set(col * cardWidth, row * cardHeight);
+    card.position.set(gridOffsetX + col * cardWidth, row * cardHeight);
 
     const bg = new PIXI.Graphics();
     bg.lineStyle(2, 0x2d99c7, 0.7);
@@ -501,61 +446,53 @@ export async function createFishInfoDialog() {
     card.addChild(bg);
 
     if (entry.isBoss) {
-      const bossBadge = new PIXI.Text("BOSS", {
+      const badge = new PIXI.Text("BOSS", {
         fill: 0xffd166,
         fontFamily: "Poppins",
         fontSize: 12,
         fontWeight: "700",
       });
-      bossBadge.position.set(cardWidth - 56, 14);
-      card.addChild(bossBadge);
+      badge.position.set(cardWidth - 56, 14);
+      card.addChild(badge);
     }
 
+    // fish_type_name as card title (centered)
     const nameText = new PIXI.Text(entry.label, {
       fill: 0xffffff,
       fontFamily: "Poppins",
-      fontSize: 18,
+      fontSize: 15,
       fontWeight: "700",
+      align: "center",
     });
-    nameText.position.set(14, 12);
+    nameText.anchor.set(0.5, 0);
+    nameText.position.set((cardWidth - 12) / 2, 12);
     card.addChild(nameText);
 
-    const preview = buildPreviewSprite(entry, cardWidth - 12, cardHeight - 12);
+    const preview =
+      entry.previewKind === "spine"
+        ? buildSpinePreview(entry)
+        : buildAtlasPreview(entry);
+    fitPreviewToCard(preview, cardWidth - 12, cardHeight - 12, entry.scale);
     card.addChild(preview);
 
-    const familyText = new PIXI.Text(entry.familyName, {
-      fill: 0x8ecae6,
-      fontFamily: "Poppins",
-      fontSize: 14,
-    });
-    familyText.position.set(14, cardHeight - 96);
-    card.addChild(familyText);
-
-    const stateText = new PIXI.Text(`State: ${entry.stateCode}`, {
-      fill: 0xb7e4f9,
-      fontFamily: "Poppins",
-      fontSize: 13,
-    });
-    stateText.position.set(14, cardHeight - 72);
-    card.addChild(stateText);
-
-    const rewardText = new PIXI.Text(`Reward: ${entry.rewardLabel}`, {
+    // reward centered (moved up slightly since familyName is removed)
+    const rewardText = new PIXI.Text(`${entry.rewardLabel}`, {
       fill: 0xffd166,
       fontFamily: "Poppins",
-      fontSize: 16,
+      fontSize: 20,
       fontWeight: "700",
+      align: "center",
     });
-    rewardText.position.set(14, cardHeight - 46);
+    rewardText.anchor.set(0.5, 0);
+    rewardText.position.set((cardWidth - 12) / 2, cardHeight - 46);
     card.addChild(rewardText);
 
     return card;
   }
 
-  // Full-page centered layout for a single special spine fish
   function buildSoloCard(entry: FishInfoEntry) {
     const card = new PIXI.Container();
 
-    // Background panel
     const bg = new PIXI.Graphics();
     bg.lineStyle(3, entry.isBoss ? 0xffd166 : 0x2d99c7, 0.85);
     bg.beginFill(entry.isBoss ? 0x14263c : 0x082437, 0.97);
@@ -563,25 +500,23 @@ export async function createFishInfoDialog() {
     bg.endFill();
     card.addChild(bg);
 
-    // BOSS badge
     if (entry.isBoss) {
-      const bossBadge = new PIXI.Text("BOSS", {
+      const badge = new PIXI.Text("BOSS", {
         fill: 0xffd166,
         fontFamily: "Poppins",
         fontSize: 14,
         fontWeight: "700",
       });
-      bossBadge.anchor.set(0.5, 0);
-      bossBadge.position.set(CONTENT_WIDTH / 2, 16);
-      card.addChild(bossBadge);
+      badge.anchor.set(0.5, 0);
+      badge.position.set(CONTENT_WIDTH / 2, 16);
+      card.addChild(badge);
     }
 
-    // Spine preview — large and centered
     const preview = buildSpinePreview(entry);
     fitPreviewSolo(preview, entry.scale);
     card.addChild(preview);
 
-    // Labels centered at the bottom
+    // fish_type_name as large centered title (solo page)
     const nameText = new PIXI.Text(entry.label, {
       fill: 0xffffff,
       fontFamily: "Poppins",
@@ -590,46 +525,29 @@ export async function createFishInfoDialog() {
       align: "center",
     });
     nameText.anchor.set(0.5, 0);
-    nameText.position.set(CONTENT_WIDTH / 2, CONTENT_HEIGHT - 100);
+    nameText.position.set(CONTENT_WIDTH / 2, CONTENT_HEIGHT - 72);
     card.addChild(nameText);
 
-    const familyText = new PIXI.Text(entry.familyName, {
-      fill: 0x8ecae6,
-      fontFamily: "Poppins",
-      fontSize: 16,
-      align: "center",
-    });
-    familyText.anchor.set(0.5, 0);
-    familyText.position.set(CONTENT_WIDTH / 2, CONTENT_HEIGHT - 68);
-    card.addChild(familyText);
-
-    const stateText = new PIXI.Text(`State: ${entry.stateCode}`, {
-      fill: 0xb7e4f9,
-      fontFamily: "Poppins",
-      fontSize: 14,
-      align: "center",
-    });
-    stateText.anchor.set(0.5, 0);
-    stateText.position.set(CONTENT_WIDTH / 2, CONTENT_HEIGHT - 46);
-    card.addChild(stateText);
-
-    const rewardText = new PIXI.Text(`Reward: ${entry.rewardLabel}`, {
+    // reward centered (moved up since familyName is removed)
+    const rewardText = new PIXI.Text(`${entry.rewardLabel}`, {
       fill: 0xffd166,
       fontFamily: "Poppins",
-      fontSize: 20,
+      fontSize: 22,
       fontWeight: "700",
       align: "center",
     });
     rewardText.anchor.set(0.5, 0);
-    rewardText.position.set(CONTENT_WIDTH / 2, CONTENT_HEIGHT - 22);
+    rewardText.position.set(CONTENT_WIDTH / 2, CONTENT_HEIGHT - 36);
     card.addChild(rewardText);
 
     return card;
   }
 
+  //pagination 
+
   function renderPage(page: number) {
     clearLivePreviews();
-    content.removeChildren().forEach((child) => child.destroy());
+    content.removeChildren().forEach((c) => c.destroy());
 
     const totalPages = Math.max(pageSlots.length, 1);
     currentPage = Math.max(0, Math.min(page, totalPages - 1));
@@ -637,20 +555,16 @@ export async function createFishInfoDialog() {
     const slot = pageSlots[currentPage];
 
     if (!slot) {
-      const emptyState = new PIXI.Text("No fish data available.", {
-        fill: 0xa8dbff,
-        fontFamily: "Poppins",
-        fontSize: 24,
+      const empty = new PIXI.Text("No fish data available.", {
+        fill: 0xa8dbff, fontFamily: "Poppins", fontSize: 24,
       });
-      emptyState.anchor.set(0.5);
-      emptyState.position.set(CONTENT_WIDTH / 2, CONTENT_HEIGHT / 2);
-      content.addChild(emptyState);
+      empty.anchor.set(0.5);
+      empty.position.set(CONTENT_WIDTH / 2, CONTENT_HEIGHT / 2);
+      content.addChild(empty);
     } else if (slot.kind === "solo") {
       content.addChild(buildSoloCard(slot.entry));
     } else {
-      slot.entries.forEach((entry, index) => {
-        content.addChild(buildCard(entry, index));
-      });
+      slot.entries.forEach((entry, i) => content.addChild(buildCard(entry, i)));
     }
 
     pageIndicator.text = `${currentPage + 1} / ${totalPages}`;
@@ -658,30 +572,16 @@ export async function createFishInfoDialog() {
     nextButton.alpha = currentPage >= totalPages - 1 ? 0.45 : 1;
   }
 
-  function goToPage(page: number) {
-    renderPage(page);
-  }
+  function goToPage(page: number) { renderPage(page); }
 
-  function close() {
-    container.visible = false;
-  }
-
-  function open() {
-    renderPage(currentPage);
-    container.visible = true;
-  }
-
-  overlay.on("pointertap", close);
-  closeButton.on("pointertap", close);
+  overlay.on("pointertap", () => { container.visible = false; });
+  closeButton.on("pointertap", () => { container.visible = false; });
   renderPage(0);
 
   return {
     container,
-    open,
-    close,
-    destroy() {
-      clearLivePreviews();
-      container.destroy({ children: true });
-    },
+    open() { renderPage(currentPage); container.visible = true; },
+    close() { container.visible = false; },
+    destroy() { clearLivePreviews(); container.destroy({ children: true }); },
   };
 }

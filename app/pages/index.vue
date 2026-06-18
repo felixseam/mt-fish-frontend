@@ -16,6 +16,8 @@
     @purchase-confirmed="handleCoinPurchase" />
 
   <GameSettingsDialog v-model="isGameSettingsDialogOpen" />
+  <StatementSheet ref="statementSheetRef" />
+  <TransactionSheet ref="transactionSheetRef" />
 
   <LogoutDialog v-model="isLogoutDialogOpen" @confirm="handleLogoutConfirm" />
 </template>
@@ -27,6 +29,8 @@ import Insufficientbalancedialog from '~/components/Insufficientbalancedialog.vu
 import LogoutDialog from '~/components/LogoutDialog.vue'
 import Notificationdialog from '~/components/Notificationdialog.vue'
 import ProfileDialog from '~/components/ProfileDialog.vue'
+import StatementSheet from '~/components/StatementSheet.vue'
+import TransactionSheet from '~/components/TransactionSheet.vue'
 import type { Notification } from '~/components/Notificationdialog.vue'
 import type { PurchasePayload } from '~/components/Insufficientbalancedialog.vue'
 import { useFishGameplayScene } from '~/composables/game_core/game/useFishGameplayScene'
@@ -49,11 +53,19 @@ const isGamePausedDialogOpen = ref(false)
 const isSessionExpiredDialogOpen = ref(false)
 const sessionExpiredAutoCountdown = ref(false)
 const notifications = ref<Notification[]>([])
+const notificationTotal = ref(0)
+const notificationUnreadTotal = ref(0)
+const notificationPage = ref(1)
+const isLoadingNotifications = ref(false)
+const statementSheetRef = ref<{ open: () => Promise<void> | void } | null>(null)
+const transactionSheetRef = ref<{ open: () => Promise<void> | void } | null>(null)
 const memberStore = useMemberStore()
 const authStore = useAuthStore()
 const { mount, destroy, setPlayerAvatar, resumeGame } = useFishGameplayScene()
+const notificationsPerPage = 10
 
 const currentCoins = computed(() => Number(memberStore.info.coin_amount ?? '0') || 0)
+const hasMoreNotifications = computed(() => notifications.value.length < notificationTotal.value)
 
 function formatNotificationTime(createdAt: string): string {
   const date = new Date(createdAt)
@@ -94,20 +106,59 @@ function mapNotification(item: NotificationItem): Notification {
   }
 }
 
-async function loadNotifications() {
+async function loadNotifications(page = 1, append = false) {
+  if (isLoadingNotifications.value) return
+
+  isLoadingNotifications.value = true
+
   try {
-    const response = await getMyNotifications()
+    const response = await getMyNotifications(page, notificationsPerPage)
+    const payload = response?.data?.value
     const list = response?.data?.value?.data?.notifications ?? []
-    notifications.value = list.map(mapNotification)
+    const mappedNotifications = list.map(mapNotification)
+
+    notificationTotal.value = payload?.total ?? mappedNotifications.length
+    notificationUnreadTotal.value = payload?.data?.total_unread ?? notificationUnreadTotal.value
+    notificationPage.value = payload?.page ?? page
+
+    if (append) {
+      const existingIds = new Set(notifications.value.map((item) => item.id))
+      notifications.value = [
+        ...notifications.value,
+        ...mappedNotifications.filter((item) => !existingIds.has(item.id)),
+      ]
+    } else {
+      notifications.value = mappedNotifications
+    }
   } catch (error) {
     console.error('[notifications] failed to load', error)
-    notifications.value = []
+    if (!append) {
+      notifications.value = []
+      notificationTotal.value = 0
+      notificationUnreadTotal.value = 0
+      notificationPage.value = 1
+    }
+  } finally {
+    isLoadingNotifications.value = false
   }
+}
+
+function loadMoreNotifications() {
+  if (!hasMoreNotifications.value || isLoadingNotifications.value) return
+  loadNotifications(notificationPage.value + 1, true)
 }
 
 async function handleMarkRead(id: string) {
   const targetId = Number(id)
   if (!Number.isFinite(targetId)) return
+
+  const targetNotification = notifications.value.find((item) => item.id === id)
+  notifications.value = notifications.value.map((item) =>
+    item.id === id ? { ...item, read: true } : item,
+  )
+  if (targetNotification && !targetNotification.read) {
+    notificationUnreadTotal.value = Math.max(0, notificationUnreadTotal.value - 1)
+  }
 
   try {
     await markNotificationAsRead(targetId)
@@ -121,6 +172,9 @@ async function handleMarkAllRead() {
     .filter((item) => !item.read)
     .map((item) => Number(item.id))
     .filter((id) => Number.isFinite(id))
+
+  notifications.value = notifications.value.map((item) => ({ ...item, read: true }))
+  notificationUnreadTotal.value = Math.max(0, notificationUnreadTotal.value - unreadIds.length)
 
   await Promise.all(
     unreadIds.map(async (id) => {
@@ -137,6 +191,13 @@ async function handleDeleteNotification(id: string) {
   const targetId = Number(id)
   if (!Number.isFinite(targetId)) return
 
+  const targetNotification = notifications.value.find((item) => item.id === id)
+  notifications.value = notifications.value.filter((item) => item.id !== id)
+  notificationTotal.value = Math.max(0, notificationTotal.value - 1)
+  if (targetNotification && !targetNotification.read) {
+    notificationUnreadTotal.value = Math.max(0, notificationUnreadTotal.value - 1)
+  }
+
   try {
     await deleteNotification(targetId)
   } catch (error) {
@@ -148,6 +209,11 @@ async function handleClearAllNotifications() {
   const ids = notifications.value
     .map((item) => Number(item.id))
     .filter((id) => Number.isFinite(id))
+  const unreadCount = notifications.value.filter((item) => !item.read).length
+
+  notifications.value = []
+  notificationTotal.value = 0
+  notificationUnreadTotal.value = Math.max(0, notificationUnreadTotal.value - unreadCount)
 
   await Promise.all(
     ids.map(async (id) => {
@@ -202,6 +268,15 @@ onMounted(async () => {
       isProfileDialogOpen.value = true
     },
     onMute: () => {
+      isGameSettingsDialogOpen.value = true
+    },
+    onNote: () => {
+      statementSheetRef.value?.open()
+    },
+    onTransition: () => {
+      transactionSheetRef.value?.open()
+    },
+    onSetting: () => {
       isGameSettingsDialogOpen.value = true
     },
     onBell: () => {

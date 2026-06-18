@@ -19,6 +19,7 @@ import { createPlayerProfileUi } from "./createPlayerProfileUi";
 import { createMenuUi } from "./createMenuUi";
 import { useMemberStore } from "~/stores/memberStore";
 import { useFishSessionRuntime } from "./useFishSessionRuntime";
+import { useGameAudio } from "~/composables/game_core/audio/useGameAudio";
 
 type SceneDef = {
   id: string;
@@ -95,6 +96,7 @@ const scenes: SceneDef[] = [
 export function useFishGameplayScene() {
   const sessionRuntime = useFishSessionRuntime();
   const memberStore = useMemberStore();
+  const gameAudio = useGameAudio();
   const currentSceneId = ref(scenes[0]?.id ?? "bg1");
   const transitionMode = ref<MapTransitionMode>("normal");
   const currentSceneIndex = ref(0);
@@ -173,6 +175,8 @@ export function useFishGameplayScene() {
     onMute?: () => void;
     onInfo?: () => void;
     onNote?: () => void;
+    onTransition?: () => void;
+    onSetting?: () => void;
     onBell?: () => void;
     onLogout?: () => void;
   } = {};
@@ -209,6 +213,16 @@ export function useFishGameplayScene() {
 
   function isPhoenixAmbientScene(sceneId: string) {
     return sceneId === "phoenix";
+  }
+
+  function getBackgroundMusicForScene(sceneId: string) {
+    if (sceneId === "crocodileBoss") return "bgmCrocodile" as const;
+    if (sceneId === "phoenix") return "bgmPhoenix" as const;
+    return "bgmMain" as const;
+  }
+
+  function syncBackgroundMusic(sceneId: string) {
+    gameAudio.queueBackgroundMusic(getBackgroundMusicForScene(sceneId));
   }
 
   function createBackgroundSprite(url: string) {
@@ -403,11 +417,12 @@ export function useFishGameplayScene() {
         onHit: () => flashFishHit(child),
         fishData: fishData
           ? {
-              kill_rate_modifier: fishData.kill_rate_modifier,
-              id: fishData.id,
-              min_reward_odd: fishData.min_odd,
-              max_reward_odd: fishData.max_odd,
-            }
+            kill_rate_modifier: fishData.kill_rate_modifier,
+            id: fishData.id,
+            min_reward_odd: fishData.min_odd,
+            max_reward_odd: fishData.max_odd,
+            fish_type_name: fishData.fish_type_name
+          }
           : null,
       });
     }
@@ -626,6 +641,7 @@ export function useFishGameplayScene() {
       currentSceneDisplay = nextSceneDisplay;
       currentSceneIndex.value = index;
       currentSceneId.value = scene.id;
+      syncBackgroundMusic(scene.id);
       syncFishLayerToScene(currentSceneDisplay);
       return Promise.resolve();
     }
@@ -662,6 +678,7 @@ export function useFishGameplayScene() {
             currentSceneDisplay = nextSceneDisplay;
             currentSceneIndex.value = index;
             currentSceneId.value = scene.id;
+            syncBackgroundMusic(scene.id);
             syncFishLayerToScene(currentSceneDisplay);
             applySceneViewport();
             resolve();
@@ -698,6 +715,8 @@ export function useFishGameplayScene() {
       onMute?: () => void;
       onInfo?: () => void;
       onNote?: () => void;
+      onTransition?: () => void;
+      onSetting?: () => void;
       onBell?: () => void;
       onLogout?: () => void;
       onInsufficientBalance?: (payload: {
@@ -713,6 +732,8 @@ export function useFishGameplayScene() {
       onMute: options?.onMute,
       onInfo: options?.onInfo,
       onNote: options?.onNote,
+      onTransition: options?.onTransition,
+      onSetting: options?.onSetting,
       onBell: options?.onBell,
       onLogout: options?.onLogout,
     };
@@ -826,6 +847,8 @@ export function useFishGameplayScene() {
           const jackpotReward =
             response?.result.reward.jackpot_reward.payout_amount;
 
+          console.log("===========================================", isReward)
+
           if (isKill && target.display) {
             contextMachine?.playKillAnimationForDisplay(target.display);
           }
@@ -835,9 +858,7 @@ export function useFishGameplayScene() {
             isReward: isReward,
             isJackpot: isJackpot,
             killReward: Math.max(0, Math.round(Number(killReward ?? 0))),
-
             reward: Math.max(0, Math.round(Number(reward ?? 0))),
-
             jackpotReward: Math.max(0, Math.round(Number(jackpotReward ?? 0))),
           };
         } catch (err) {
@@ -873,12 +894,7 @@ export function useFishGameplayScene() {
     menuUi = await createMenuUi({
       items: [
         {
-          frame: "mute.png",
-          label: "Settings",
-          onClick: () => menuHandlers.onMute?.(),
-        },
-        {
-          frame: "about.png",
+          frame: "info.webp",
           label: "Info",
           onClick: () => {
             fishInfoDialog?.open();
@@ -886,17 +902,28 @@ export function useFishGameplayScene() {
           },
         },
         {
-          frame: "note.png",
-          label: "Note",
-          onClick: () => menuHandlers.onNote?.(),
-        },
-        {
-          frame: "bell.png",
+          frame: "notification.webp",
           label: "Bell",
           onClick: () => menuHandlers.onBell?.(),
         },
         {
-          frame: "logout.png",
+          frame: "statement.webp",
+          label: "Note",
+          onClick: () => menuHandlers.onNote?.(),
+        },
+        {
+          frame: "transition.webp",
+          label: "Transition",
+          onClick: () => menuHandlers.onTransition?.(),
+        },
+
+        {
+          frame: "setting.webp",
+          label: "Setting",
+          onClick: () => menuHandlers.onSetting?.(),
+        },
+        {
+          frame: "logout.webp",
           label: "Logout",
           onClick: () => menuHandlers.onLogout?.(),
         },
@@ -1019,7 +1046,6 @@ export function useFishGameplayScene() {
       device_meta_json: {},
     }));
     mountedAtMs = 0;
-
     destroySceneDisplay(currentSceneDisplay);
     currentSceneDisplay = null;
     cannonBetUi?.destroy();
@@ -1069,7 +1095,7 @@ export function useFishGameplayScene() {
     switchSceneById,
     setPlayerAvatar: (path: string) => playerProfileUi?.setAvatar(path),
     setPlayerUsername: (name: string) => playerProfileUi?.setUsername(name),
-    setPlayerCoins: (_amount: number) => {},
+    setPlayerCoins: (_amount: number) => { },
     isSessionSyncLost: () => sessionSyncLost,
     resumeGame,
   };

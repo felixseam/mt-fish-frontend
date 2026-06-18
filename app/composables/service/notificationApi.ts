@@ -5,6 +5,9 @@ export interface ApiResponse<T> {
   message: string
   status_code: number
   data: T
+  page?: number
+  per_page?: number
+  total?: number
 }
 
 export interface NotificationItem {
@@ -23,13 +26,26 @@ export interface NotificationItem {
 
 export interface NotificationListData {
   notifications: NotificationItem[]
+  total_unread: number
+}
+
+export interface NotificationListResponse {
+  success: boolean
+  message: string
+  status_code: number
+  data: NotificationListData
+  page: number
+  per_page: number
   total: number
 }
 
-export async function getMyNotifications() {
-  return useApiInterceptor<ApiResponse<NotificationListData>>('/notifications/', {
-    method: 'GET',
-  })
+export async function getMyNotifications(page: number = 1, perPage: number = 10) {
+  return useApiInterceptor<NotificationListResponse>(
+    `/notifications?paging_options[page]=${page}&paging_options[per_page]=${perPage}`,
+    {
+      method: 'GET',
+    }
+  )
 }
 
 export async function markNotificationAsRead(id: number) {

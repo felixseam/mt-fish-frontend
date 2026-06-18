@@ -19,7 +19,7 @@
         <span class="text-subtitle-1 font-weight-medium text-white">{{ t('notifications.title') }}</span>
         <v-spacer />
         <v-btn
-          v-if="unreadCount > 0"
+          v-if="displayUnreadCount > 0"
           variant="text"
           size="x-small"
           class="mark-all-btn mr-1"
@@ -44,13 +44,22 @@
           @click="activeTab = tab.key"
         >
           {{ tab.label }}
-          <span v-if="tab.count > 0" class="tab-badge">{{ tab.count }}</span>
+          <!-- <span v-if="tab.count > 0" class="tab-badge">{{ tab.count }}</span> -->
         </button>
       </div>
 
       <!-- Notification list -->
-      <v-card-text class="pa-0 notif-scroll">
-        <div v-if="filteredNotifications.length === 0" class="empty-state">
+      <v-card-text
+        ref="scrollContainerRef"
+        class="pa-0 notif-scroll"
+        @scroll.passive="handleScroll"
+      >
+        <div v-if="isLoading && filteredNotifications.length === 0" class="empty-state">
+          <v-progress-circular indeterminate color="#44d7c5" size="28" width="3" />
+          <p class="empty-text mt-3">{{ t('common.loading') }}</p>
+        </div>
+
+        <div v-else-if="filteredNotifications.length === 0" class="empty-state">
           <v-icon size="38" color="rgba(173,228,242,0.25)">mdi-bell-off-outline</v-icon>
           <p class="empty-text mt-3">{{ t('notifications.empty') }}</p>
         </div>
@@ -90,12 +99,16 @@
             </v-btn>
           </div>
         </transition-group>
+
+        <div v-if="isLoading && filteredNotifications.length > 0" class="load-more-state">
+          <v-progress-circular indeterminate color="#44d7c5" size="20" width="3" />
+        </div>
       </v-card-text>
 
       <!-- Footer -->
       <v-divider color="rgba(58,168,232,0.1)" />
       <v-card-actions class="px-4 py-3 d-flex justify-space-between">
-        <span class="footer-count">{{ t('notifications.totalUnread', { total: notifications.length, unread: unreadCount }) }}</span>
+        <span class="footer-count">{{ t('notifications.totalUnread', { total: totalCount, unread: displayUnreadCount }) }}</span>
         <v-btn
           variant="text"
           size="small"
@@ -113,7 +126,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 const { t } = useFrontendI18n()
 
 export type NotifType = 'success' | 'error' | 'info' | 'warning' | 'system'
@@ -130,6 +143,10 @@ export interface Notification {
 const props = defineProps<{
   modelValue: boolean
   notifications?: Notification[]
+  total?: number
+  unreadTotal?: number
+  isLoading?: boolean
+  hasMore?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -139,6 +156,7 @@ const emit = defineEmits<{
   'mark-all-read': []
   'delete': [id: string]
   'clear-all': []
+  'load-more': []
 }>()
 
 const dialogVisible = computed({
@@ -147,20 +165,23 @@ const dialogVisible = computed({
 })
 
 const activeTab = ref<'all' | 'unread' | 'success' | 'warning'>('all')
+const scrollContainerRef = ref<HTMLElement | null>(null)
 
 const notifications = ref<Notification[]>(
-  props.notifications ?? sampleNotifications(),
+  props.notifications ? [...props.notifications] : [],
 )
 
 watch(() => props.notifications, (val) => {
-  if (val) notifications.value = val
+  notifications.value = val ? [...val] : []
 }, { deep: true })
 
 const unreadCount = computed(() => notifications.value.filter(n => !n.read).length)
+const displayUnreadCount = computed(() => props.unreadTotal ?? unreadCount.value)
+const totalCount = computed(() => props.total ?? notifications.value.length)
 
 const tabs = computed(() => [
-  { key: 'all'     as const, label: t('notifications.all'),     count: notifications.value.length },
-  { key: 'unread'  as const, label: t('notifications.unread'),  count: unreadCount.value           },
+  { key: 'all'     as const, label: t('notifications.all'),      },
+  { key: 'unread'  as const, label: t('notifications.unread'),  count: displayUnreadCount.value    },
   { key: 'success' as const, label: t('notifications.rewards'), count: notifications.value.filter(n => n.type === 'success').length },
   { key: 'warning' as const, label: t('notifications.alerts'),  count: notifications.value.filter(n => n.type === 'warning' || n.type === 'error').length },
 ])
@@ -178,25 +199,50 @@ function markRead(id: string) {
   const n = notifications.value.find(n => n.id === id)
   if (n) n.read = true
   emit('mark-read', id)
+  void maybeLoadMore()
 }
 
 function markAllRead() {
   notifications.value.forEach(n => { n.read = true })
   emit('mark-all-read')
+  void maybeLoadMore()
 }
 
 function deleteNotif(id: string) {
   notifications.value = notifications.value.filter(n => n.id !== id)
   emit('delete', id)
+  void maybeLoadMore()
 }
 
 function clearAll() {
   notifications.value = []
   emit('clear-all')
+  void maybeLoadMore()
 }
 
 function close() {
   dialogVisible.value = false
+}
+
+function requestMore() {
+  if (props.isLoading || !props.hasMore) return
+  emit('load-more')
+}
+
+function handleScroll() {
+  const container = (scrollContainerRef.value as any)?.$el ?? scrollContainerRef.value
+  if (!container) return
+
+  const threshold = 80
+  const isNearBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - threshold
+  if (isNearBottom) requestMore()
+}
+
+async function maybeLoadMore() {
+  await nextTick()
+  const container = (scrollContainerRef.value as any)?.$el ?? scrollContainerRef.value
+  if (!dialogVisible.value || !container || props.isLoading || !props.hasMore) return
+  if (container.scrollHeight <= container.clientHeight) requestMore()
 }
 
 function typeIcon(type: NotifType): string {
@@ -231,50 +277,19 @@ function push(notif: Omit<Notification, 'id' | 'read'>) {
 
 defineExpose({ push })
 
-function sampleNotifications(): Notification[] {
-  return [
-    {
-      id: '1',
-      type: 'success',
-      title: t('notifications.exchangeSuccessful'),
-      message: '+5,000 coins · -$4.50 USD',
-      time: t('notifications.justNow'),
-      read: false,
-    },
-    {
-      id: '2',
-      type: 'success',
-      title: t('notifications.bossDefeated'),
-      message: t('notifications.bossDefeatedMessage'),
-      time: t('notifications.minutesAgo', { count: 2 }),
-      read: false,
-    },
-    {
-      id: '3',
-      type: 'warning',
-      title: t('notifications.lowBalance'),
-      message: t('notifications.lowBalanceMessage'),
-      time: t('notifications.minutesAgo', { count: 5 }),
-      read: false,
-    },
-    {
-      id: '4',
-      type: 'info',
-      title: t('notifications.newSession'),
-      message: t('notifications.newSessionMessage'),
-      time: t('notifications.minutesAgo', { count: 8 }),
-      read: true,
-    },
-    {
-      id: '5',
-      type: 'system',
-      title: t('notifications.maintenanceNotice'),
-      message: t('notifications.maintenanceMessage'),
-      time: t('notifications.hoursAgo', { count: 1 }),
-      read: true,
-    },
-  ]
-}
+watch(() => dialogVisible.value, (isOpen) => {
+  if (isOpen) {
+    void maybeLoadMore()
+  }
+})
+
+watch(() => props.notifications?.length ?? 0, () => {
+  void maybeLoadMore()
+})
+
+watch(activeTab, () => {
+  void maybeLoadMore()
+})
 </script>
 
 <style scoped>
@@ -376,6 +391,12 @@ function sampleNotifications(): Notification[] {
   font-size: 13px;
   color: rgba(173, 228, 242, 0.35);
   margin: 0;
+}
+
+.load-more-state {
+  display: flex;
+  justify-content: center;
+  padding: 16px;
 }
 
 /* Notification item */

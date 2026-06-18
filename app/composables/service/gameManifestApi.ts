@@ -91,6 +91,7 @@ export interface ManifestRenderFamily {
 
 export interface ManifestFishType {
   id: number;
+  fish_type_name: string;
   runtime_kind_1based: number;
   internal_kind: number;
   has_runtime_config: boolean;

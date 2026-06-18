@@ -1,5 +1,6 @@
 import * as PIXI from "pixi.js";
 import gsap from "gsap";
+
 import {
   ICON_BUTTON_ATLAS_URL,
   ICON_BUTTON_IMAGE_URL,
@@ -14,15 +15,17 @@ type MenuItem = {
 
 type MenuUiOptions = {
   items?: MenuItem[];
-  getAtlasTexture?: (atlasUrl: string, frame: string) => PIXI.Texture;
 };
 
 export async function createMenuUi(options?: MenuUiOptions) {
   const { getJsonAsset, preloadJsonAsset } = useFishAssetPreload();
+
   const rootContainer = new PIXI.Container();
   rootContainer.sortableChildren = true;
 
-  // ── Load atlas ────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Load atlas + texture
+  // ─────────────────────────────────────────────────────────────
   let atlasData: any = null;
   let atlasTexture: PIXI.Texture | null = null;
 
@@ -30,30 +33,106 @@ export async function createMenuUi(options?: MenuUiOptions) {
     atlasData =
       getJsonAsset<any>(ICON_BUTTON_ATLAS_URL) ??
       (await preloadJsonAsset<any>(ICON_BUTTON_ATLAS_URL));
-    atlasTexture = PIXI.Texture.from(ICON_BUTTON_IMAGE_URL);
-  } catch (e) {
-    console.warn("[MenuUi] failed to load icon_button atlas", e);
+
+    // ✅ Properly load WEBP texture
+    await PIXI.Assets.load(ICON_BUTTON_IMAGE_URL);
+
+    const baseTexture = PIXI.BaseTexture.from(ICON_BUTTON_IMAGE_URL);
+
+    // wait until resource fully loaded
+    // @ts-ignore
+    await baseTexture.resource?.load?.();
+
+    atlasTexture = new PIXI.Texture(baseTexture);
+
+    console.log(
+      "[MenuUi] atlas loaded:",
+      atlasTexture.baseTexture.width,
+      "x",
+      atlasTexture.baseTexture.height,
+    );
+
+    console.log(
+      "[MenuUi] available frames:",
+      Object.keys(atlasData?.frames ?? {}),
+    );
+  } catch (err) {
+    console.warn("[MenuUi] failed loading atlas", err);
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Get frame texture
+  // ─────────────────────────────────────────────────────────────
   function getFrameTexture(frameName: string): PIXI.Texture {
-    if (!atlasData || !atlasTexture) return PIXI.Texture.EMPTY;
-    const frameData = atlasData.frames[frameName];
-    if (!frameData) return PIXI.Texture.EMPTY;
+    if (!atlasData || !atlasTexture) {
+      console.warn("[MenuUi] atlas missing");
+      return PIXI.Texture.EMPTY;
+    }
+
+    const frameData =
+      atlasData.frames?.[frameName] 
+      // atlasData.frames?.[frameName.replace(/\.png$/, ".webp")] ??
+      // atlasData.frames?.[frameName.replace(/\.webp$/, ".png")] ??
+      // atlasData.frames?.[`${frameName}.webp`] ??
+      // atlasData.frames?.[`${frameName}.png`];
+
+    if (!frameData) {
+      console.warn(`[MenuUi] frame not found: ${frameName}`);
+      return PIXI.Texture.EMPTY;
+    }
+
     const { x, y, w, h } = frameData.frame;
+
+    const bw = atlasTexture.baseTexture.width;
+    const bh = atlasTexture.baseTexture.height;
+
+    // safety check
+    if (x + w > bw || y + h > bh) {
+      console.warn(
+        `[MenuUi] frame out of bounds: ${frameName}`,
+        { x, y, w, h, bw, bh },
+      );
+
+      return PIXI.Texture.EMPTY;
+    }
+
     return new PIXI.Texture(
-      atlasTexture!.baseTexture,
+      atlasTexture.baseTexture,
       new PIXI.Rectangle(x, y, w, h),
     );
   }
 
-  // ── Default menu items ────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Default menu items
+  // MUST MATCH ATLAS JSON EXACTLY
+  // ─────────────────────────────────────────────────────────────
   const defaultItems: MenuItem[] = [
-    { frame: "mute.png", label: "Mute", onClick: () => console.log("mute") },
-    { frame: "about.png", label: "About", onClick: () => console.log("about") },
-    { frame: "note.png", label: "Note", onClick: () => console.log("note") },
-    { frame: "bell.png", label: "Bell", onClick: () => console.log("bell") },
     {
-      frame: "logout.png",
+      frame: "notification.webp",
+      label: "Notification",
+      onClick: () => console.log("notification"),
+    },
+
+    {
+      frame: "statement.webp",
+      label: "Statement",
+      onClick: () => console.log("statement"),
+    },
+
+    {
+      frame: "transition.webp",
+      label: "Transition",
+      onClick: () => console.log("transition"),
+    },
+
+    {
+      frame: "setting.webp",
+      label: "Setting",
+      onClick: () => console.log("setting"),
+    },
+
+    {
+      frame: "logout.webp",
       label: "Logout",
       onClick: () => console.log("logout"),
     },
@@ -61,137 +140,249 @@ export async function createMenuUi(options?: MenuUiOptions) {
 
   const menuItems = options?.items ?? defaultItems;
 
-  // ── Sizes ─────────────────────────────────────────────────────────────────
-  const ICON_SIZE = 64;
-  const ICON_GAP = 16;
-  const PADDING = 16;
+  // ─────────────────────────────────────────────────────────────
+  // Sizes
+  // ─────────────────────────────────────────────────────────────
   const MENU_BTN_SIZE = 64;
 
-  const panelW = ICON_SIZE + PADDING * 2;
-  const panelH = menuItems.length * (ICON_SIZE + ICON_GAP) + PADDING * 2;
+  const ICON_SIZE = 56;
 
-  // ── Overlay (click-outside catcher) ───────────────────────────────────────
-  // Sits at zIndex 0, covers entire screen, hidden until panel opens
+  const ICON_GAP = 12;
+
+  const PADDING_X = 20;
+
+  const PADDING_Y = 20;
+
+  const panelW = ICON_SIZE + PADDING_X * 2;
+
+  const panelH =
+    menuItems.length * (ICON_SIZE + ICON_GAP) -
+    ICON_GAP +
+    PADDING_Y * 2;
+
+  // ─────────────────────────────────────────────────────────────
+  // Overlay
+  // ─────────────────────────────────────────────────────────────
   const overlay = new PIXI.Graphics();
-  overlay.beginFill(0x000000, 0.01); // near-invisible but hittable
+
+  overlay.beginFill(0x000000, 0.01);
+
   overlay.drawRect(-5000, -5000, 10000, 10000);
+
   overlay.endFill();
+
   overlay.eventMode = "static";
+
   overlay.visible = false;
+
   overlay.zIndex = 0;
+
   overlay.on("pointerdown", (e) => {
     e.stopPropagation();
     closePanel();
   });
+
   rootContainer.addChild(overlay);
 
-  // ── Menu toggle button ────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Menu button
+  // ─────────────────────────────────────────────────────────────
   const menuBtnContainer = new PIXI.Container();
-  menuBtnContainer.eventMode = "static";
-  menuBtnContainer.cursor = "pointer";
-  menuBtnContainer.zIndex = 2; // always on top
 
-  const menuBtnGlow = new PIXI.Graphics();
-  menuBtnGlow.lineStyle(2, 0x3aa8e8, 0.6);
-  menuBtnGlow.beginFill(0x0a2240, 0.85);
-  menuBtnGlow.drawCircle(
+  menuBtnContainer.eventMode = "static";
+
+  menuBtnContainer.cursor = "pointer";
+
+  menuBtnContainer.zIndex = 2;
+
+  const menuBtnBg = new PIXI.Graphics();
+
+  menuBtnBg.lineStyle(2, 0x3aa8e8, 0.6);
+
+  menuBtnBg.beginFill(0x0a2240, 0.85);
+
+  menuBtnBg.drawCircle(
     MENU_BTN_SIZE / 2,
     MENU_BTN_SIZE / 2,
     MENU_BTN_SIZE / 2,
   );
-  menuBtnGlow.endFill();
-  menuBtnContainer.addChild(menuBtnGlow);
 
-  const menuIconTex = getFrameTexture("note.png");
+  menuBtnBg.endFill();
+
+  menuBtnContainer.addChild(menuBtnBg);
+
+  // ✅ WEBP frame
+  const menuIconTex = getFrameTexture("menu.webp");
+  const menuBackIconTex = getFrameTexture("arrow_back.webp");
+
   const menuIcon = new PIXI.Sprite(menuIconTex);
+
   menuIcon.anchor.set(0.5);
-  menuIcon.position.set(MENU_BTN_SIZE / 2, MENU_BTN_SIZE / 2);
-  menuIcon.width = MENU_BTN_SIZE - 16;
-  menuIcon.height = MENU_BTN_SIZE - 16;
+
+  menuIcon.position.set(
+    MENU_BTN_SIZE / 2,
+    MENU_BTN_SIZE / 2,
+  );
+
+  menuIcon.width = MENU_BTN_SIZE - 20;
+
+  menuIcon.height = MENU_BTN_SIZE - 20;
+
   menuBtnContainer.addChild(menuIcon);
 
   rootContainer.addChild(menuBtnContainer);
 
-  // ── Panel ─────────────────────────────────────────────────────────────────
-  // Positioned to the RIGHT of the toggle button
+  // ─────────────────────────────────────────────────────────────
+  // Panel
+  // ─────────────────────────────────────────────────────────────
   const panel = new PIXI.Container();
-  panel.alpha = 0;
-  panel.visible = false;
-  panel.zIndex = 1;
-  // Place panel to the right of the toggle button with a small gap
-  panel.position.set(MENU_BTN_SIZE + 12, -(panelH / 2) + MENU_BTN_SIZE / 2);
 
-  // ── Panel background ──────────────────────────────────────────────────────
-  const panelBgTex = getFrameTexture("Background.png");
-  if (panelBgTex !== PIXI.Texture.EMPTY) {
-    const panelBgSprite = new PIXI.Sprite(panelBgTex);
-    panelBgSprite.width = panelW;
-    panelBgSprite.height = panelH;
-    // Block clicks from passing through to overlay
-    panelBgSprite.eventMode = "static";
-    panelBgSprite.on("pointerdown", (e) => e.stopPropagation());
-    panel.addChild(panelBgSprite);
+  panel.alpha = 0;
+
+  panel.visible = false;
+
+  panel.zIndex = 1;
+
+  panel.position.set(
+    MENU_BTN_SIZE + 10,
+    -(panelH / 2) + MENU_BTN_SIZE / 2,
+  );
+
+  // ─────────────────────────────────────────────────────────────
+  // Background
+  // ─────────────────────────────────────────────────────────────
+  const bgTex = getFrameTexture("Background.webp");
+
+  if (bgTex !== PIXI.Texture.EMPTY) {
+    const bgSprite = new PIXI.Sprite(bgTex);
+
+    bgSprite.width = panelW;
+
+    bgSprite.height = panelH;
+
+    bgSprite.eventMode = "static";
+
+    bgSprite.on("pointerdown", (e) => e.stopPropagation());
+
+    panel.addChild(bgSprite);
   } else {
-    const panelBgFallback = new PIXI.Graphics();
-    panelBgFallback.lineStyle(2, 0x3aa8e8, 0.7);
-    panelBgFallback.beginFill(0x051928, 0.92);
-    panelBgFallback.drawRoundedRect(0, 0, panelW, panelH, 20);
-    panelBgFallback.endFill();
-    panelBgFallback.eventMode = "static";
-    panelBgFallback.on("pointerdown", (e) => e.stopPropagation());
-    panel.addChild(panelBgFallback);
+    const fallback = new PIXI.Graphics();
+
+    fallback.lineStyle(2, 0x3aa8e8, 0.7);
+
+    fallback.beginFill(0x051928, 0.92);
+
+    fallback.drawRoundedRect(0, 0, panelW, panelH, 20);
+
+    fallback.endFill();
+
+    fallback.eventMode = "static";
+
+    fallback.on("pointerdown", (e) => e.stopPropagation());
+
+    panel.addChild(fallback);
   }
 
-  // Inner glow accent line at the top
+  // ─────────────────────────────────────────────────────────────
+  // Glow line
+  // ─────────────────────────────────────────────────────────────
   const panelGlow = new PIXI.Graphics();
-  panelGlow.lineStyle(1.5, 0x3aa8e8, 0.3);
-  panelGlow.moveTo(20, 1);
-  panelGlow.lineTo(panelW - 20, 1);
+
+  panelGlow.lineStyle(1.5, 0x3aa8e8, 0.35);
+
+  panelGlow.moveTo(18, 1);
+
+  panelGlow.lineTo(panelW - 18, 1);
+
   panel.addChild(panelGlow);
 
-  // ── Icon buttons ──────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Icon buttons
+  // ─────────────────────────────────────────────────────────────
   menuItems.forEach((item, i) => {
     const btnContainer = new PIXI.Container();
-    btnContainer.eventMode = "static";
-    btnContainer.cursor = "pointer";
-    btnContainer.position.set(PADDING, PADDING + i * (ICON_SIZE + ICON_GAP));
 
-    // Circle background
+    btnContainer.eventMode = "static";
+
+    btnContainer.cursor = "pointer";
+
+    btnContainer.position.set(
+      PADDING_X,
+      PADDING_Y + i * (ICON_SIZE + ICON_GAP),
+    );
+
+    // circle bg
     const circleBg = new PIXI.Graphics();
-    circleBg.lineStyle(2, 0x3aa8e8, 0.5);
-    circleBg.beginFill(0x0a2240, 0.8);
-    circleBg.drawCircle(ICON_SIZE / 2, ICON_SIZE / 2, ICON_SIZE / 2);
+
+    circleBg.lineStyle(1.5, 0x3aa8e8, 0.45);
+
+    circleBg.beginFill(0x0a2240, 0.75);
+
+    circleBg.drawCircle(
+      ICON_SIZE / 2,
+      ICON_SIZE / 2,
+      ICON_SIZE / 2,
+    );
+
     circleBg.endFill();
+
     btnContainer.addChild(circleBg);
 
-    // Icon sprite
+    // icon
     const iconTex = getFrameTexture(item.frame);
+
     const iconSprite = new PIXI.Sprite(iconTex);
+
     iconSprite.anchor.set(0.5);
-    iconSprite.position.set(ICON_SIZE / 2, ICON_SIZE / 2);
-    iconSprite.width = ICON_SIZE - 16;
-    iconSprite.height = ICON_SIZE - 16;
+
+    iconSprite.position.set(
+      ICON_SIZE / 2,
+      ICON_SIZE / 2,
+    );
+
+    iconSprite.width = ICON_SIZE - 14;
+
+    iconSprite.height = ICON_SIZE - 14;
+
     btnContainer.addChild(iconSprite);
 
-    // Hover
+    // hover
     btnContainer.on("pointerover", () => {
-      gsap.to(circleBg, { alpha: 1, duration: 0.15 });
-      gsap.to(btnContainer.scale, { x: 1.1, y: 1.1, duration: 0.15 });
-    });
-    btnContainer.on("pointerout", () => {
-      gsap.to(circleBg, { alpha: 1, duration: 0.15 });
-      gsap.to(btnContainer.scale, { x: 1, y: 1, duration: 0.15 });
+      gsap.to(btnContainer.scale, {
+        x: 1.1,
+        y: 1.1,
+        duration: 0.12,
+      });
     });
 
-    // Click — stopPropagation so overlay does NOT fire
+    btnContainer.on("pointerout", () => {
+      gsap.to(btnContainer.scale, {
+        x: 1,
+        y: 1,
+        duration: 0.12,
+      });
+    });
+
+    // click
     btnContainer.on("pointerdown", (e) => {
       e.stopPropagation();
+
       gsap.fromTo(
         btnContainer.scale,
-        { x: 0.88, y: 0.88 },
-        { x: 1, y: 1, duration: 0.18, ease: "back.out(2)" },
+        {
+          x: 0.85,
+          y: 0.85,
+        },
+        {
+          x: 1,
+          y: 1,
+          duration: 0.2,
+          ease: "back.out(2)",
+        },
       );
+
       closePanel();
+
       item.onClick();
     });
 
@@ -200,59 +391,117 @@ export async function createMenuUi(options?: MenuUiOptions) {
 
   rootContainer.addChild(panel);
 
-  // ── Toggle logic ──────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Toggle logic
+  // ─────────────────────────────────────────────────────────────
   let isOpen = false;
+
+  function setMenuButtonIcon(open: boolean) {
+    menuIcon.texture = open ? menuBackIconTex : menuIconTex;
+  }
 
   function openPanel() {
     isOpen = true;
-    panel.visible = true;
+    setMenuButtonIcon(true);
+
     overlay.visible = true;
-    panel.scale.set(0.8, 0.8);
-    gsap.to(panel, { alpha: 1, duration: 0.2 });
-    gsap.to(panel.scale, { x: 1, y: 1, duration: 0.2, ease: "back.out(1.5)" });
+
+    panel.visible = true;
+
+    panel.scale.set(0.8);
+
+    gsap.to(panel, {
+      alpha: 1,
+      duration: 0.2,
+    });
+
+    gsap.to(panel.scale, {
+      x: 1,
+      y: 1,
+      duration: 0.22,
+      ease: "back.out(1.5)",
+    });
   }
 
   function closePanel() {
     isOpen = false;
+    setMenuButtonIcon(false);
+
     overlay.visible = false;
+
     gsap.to(panel, {
       alpha: 0,
       duration: 0.15,
       onComplete: () => {
-        if (!panel.destroyed) panel.visible = false;
+        if (!panel.destroyed) {
+          panel.visible = false;
+        }
       },
     });
-    gsap.to(panel.scale, { x: 0.8, y: 0.8, duration: 0.15 });
+
+    gsap.to(panel.scale, {
+      x: 0.8,
+      y: 0.8,
+      duration: 0.15,
+    });
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Menu button events
+  // ─────────────────────────────────────────────────────────────
   menuBtnContainer.on("pointerdown", (e) => {
     e.stopPropagation();
+
     gsap.fromTo(
       menuBtnContainer.scale,
-      { x: 0.88, y: 0.88 },
-      { x: 1, y: 1, duration: 0.18, ease: "back.out(2)" },
+      {
+        x: 0.88,
+        y: 0.88,
+      },
+      {
+        x: 1,
+        y: 1,
+        duration: 0.18,
+        ease: "back.out(2)",
+      },
     );
+
     isOpen ? closePanel() : openPanel();
   });
 
-  // ── Hover on toggle button ────────────────────────────────────────────────
   menuBtnContainer.on("pointerover", () => {
-    gsap.to(menuBtnGlow, { alpha: 1, duration: 0.15 });
-    gsap.to(menuBtnContainer.scale, { x: 1.1, y: 1.1, duration: 0.15 });
-  });
-  menuBtnContainer.on("pointerout", () => {
-    gsap.to(menuBtnGlow, { alpha: 1, duration: 0.15 });
-    gsap.to(menuBtnContainer.scale, { x: 1, y: 1, duration: 0.15 });
+    gsap.to(menuBtnContainer.scale, {
+      x: 1.1,
+      y: 1.1,
+      duration: 0.15,
+    });
   });
 
-  // ── Public API ────────────────────────────────────────────────────────────
+  menuBtnContainer.on("pointerout", () => {
+    gsap.to(menuBtnContainer.scale, {
+      x: 1,
+      y: 1,
+      duration: 0.15,
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Destroy
+  // ─────────────────────────────────────────────────────────────
   function destroy() {
     overlay.removeAllListeners();
+
     menuBtnContainer.removeAllListeners();
+
     gsap.killTweensOf(panel);
+
     gsap.killTweensOf(panel.scale);
+
     gsap.killTweensOf(menuBtnContainer.scale);
-    rootContainer.destroy({ children: true });
+
+    rootContainer.destroy({
+      children: true,
+    });
   }
 
   return {

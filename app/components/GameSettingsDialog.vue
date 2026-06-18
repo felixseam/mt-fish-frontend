@@ -86,6 +86,8 @@
 </template>
 
 <script setup lang="ts">
+import { useGameAudioSettings } from '~/composables/game_core/audio/useGameAudioSettings'
+
 const props = defineProps<{
   modelValue: boolean;
 }>();

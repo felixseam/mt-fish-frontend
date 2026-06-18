@@ -1,4 +1,52 @@
 <template>
+  <!-- ── Insufficient Coins Dialog ── -->
+  <v-dialog v-model="insufficientCoinsVisible" max-width="360" persistent :scrim="true"
+    scrim-color="rgba(0,0,0,0.75)" transition="dialog-bottom-transition">
+    <v-card class="ocean-card insufficient-card" rounded="xl">
+      <div class="insufficient-body">
+        <!-- Animated coin icon -->
+        <div class="insufficient-icon-wrap">
+          <div class="insufficient-icon-ring" />
+          <v-icon color="#fac775" size="38">mdi-circle-multiple-outline</v-icon>
+        </div>
+
+        <div class="insufficient-title">{{ t('balance.notEnoughCoinsTitle') }}</div>
+        <div class="insufficient-desc">
+          {{ t('balance.notEnoughCoinsMessage') }}<br />
+          {{ t('balance.notEnoughCoinsSubmessage') }}
+        </div>
+
+        <!-- Coin status -->
+        <div class="insufficient-status-row">
+          <div class="insuf-stat">
+            <div class="insuf-stat-label">{{ t('balance.youHave') }}</div>
+            <div class="insuf-stat-value" style="color:#fac775">{{ formatCoins(currentCoinBalance) }}</div>
+            <div class="insuf-stat-unit">{{ t('balance.coins') }}</div>
+          </div>
+          <div class="insuf-arrow">
+            <v-icon color="rgba(173,228,242,0.25)" size="18">mdi-arrow-right</v-icon>
+          </div>
+          <div class="insuf-stat">
+            <div class="insuf-stat-label">{{ t('balance.betRequires') }}</div>
+            <div class="insuf-stat-value" style="color:#f09595">{{ formatCoins(insufficientBetAmount) }}</div>
+            <div class="insuf-stat-unit">{{ t('balance.coins') }}</div>
+          </div>
+        </div>
+
+        <div class="insufficient-actions">
+          <v-btn variant="flat" class="ocean-btn-confirm insuf-exchange-btn" @click="openExchangeFromInsufficient">
+            <v-icon start size="15">mdi-swap-horizontal</v-icon>
+            {{ t('balance.exchangeCoinsNow') }}
+          </v-btn>
+          <v-btn variant="text" class="insuf-cancel-btn" @click="closeInsufficientDialog">
+            {{ t('common.cancel') }}
+          </v-btn>
+        </div>
+      </div>
+    </v-card>
+  </v-dialog>
+
+  <!-- ── Main Exchange Dialog ── -->
   <v-dialog v-model="internalVisible" max-width="500" persistent :scrim="true" scrim-color="rgba(0,0,0,0.75)"
     transition="dialog-bottom-transition" :fullscreen="$vuetify.display.xs" @update:model-value="onDialogUpdate">
     <v-card class="ocean-card" rounded="xl">
@@ -20,12 +68,26 @@
       <!-- ── Tab bar (hidden on confirm/success steps) ── -->
       <div v-if="currentStep === 'form'" class="tab-bar">
         <button class="exchange-tab" :class="{ 'tab-active-b2c': activeTab === 'b2c' }" @click="switchTab('b2c')">
-          <v-icon size="15" class="mr-1">mdi-wallet-outline</v-icon>
-          Balance → Coins
+          <div class="tab-inner">
+            <div class="tab-icon-wrap tab-icon-b2c">
+              <v-icon size="14">mdi-wallet-outline</v-icon>
+            </div>
+            <div class="tab-text-wrap">
+              <span class="tab-label">{{ t('balance.topUpCoins') }}</span>
+              <!-- <span class="tab-desc">Balance → Coins</span> -->
+            </div>
+          </div>
         </button>
         <button class="exchange-tab" :class="{ 'tab-active-c2b': activeTab === 'c2b' }" @click="switchTab('c2b')">
-          <v-icon size="15" class="mr-1">mdi-circle-multiple-outline</v-icon>
-          Coins → Balance
+          <div class="tab-inner">
+            <div class="tab-icon-wrap tab-icon-c2b">
+              <v-icon size="14">mdi-circle-multiple-outline</v-icon>
+            </div>
+            <div class="tab-text-wrap">
+              <span class="tab-label">{{ t('balance.cashOut') }}</span>
+              <!-- <span class="tab-desc">Coins → Balance</span> -->
+            </div>
+          </div>
         </button>
       </div>
 
@@ -34,11 +96,11 @@
       ══════════════════════════════════════════════════════════ -->
       <template v-if="currentStep === 'form'">
 
-        <!-- ── B2C: Balance → Coins ── -->
+        <!-- ── B2C: Top Up Coins ── -->
         <div v-if="activeTab === 'b2c'" class="step-scroll-body">
           <div class="pa-4">
             <!-- Currency selector -->
-            <div class="slabel mb-2">Pay with</div>
+            <div class="slabel mb-2">{{ t('balance.payWith') }}</div>
             <div class="bar-outer mb-3">
               <button class="bar-arrow-btn" :class="{ hidden: balBarAtStart }" @click="scrollBalBar(-1)">
                 <v-icon size="13">mdi-chevron-left</v-icon>
@@ -51,8 +113,7 @@
                       :class="{ 'bar-bal-item-active': selectedCurrency === bal.currency_code }"
                       :disabled="isLoadingForm || isLoadingPackages" @click="onSelectCurrency(bal.currency_code)">
                       <div class="bar-bal-code">{{ bal.currency_code }}</div>
-                      <div class="bar-bal-amount">{{ formatCurrencyByCode(toNumber(bal.amount), bal.currency_code) }}
-                      </div>
+                      <div class="bar-bal-amount">{{ formatCurrencyByCode(toNumber(bal.amount), bal.currency_code) }}</div>
                     </button>
                   </template>
                 </div>
@@ -85,7 +146,6 @@
                 <div class="pkg-info">
                   <div class="pkg-title">
                     {{ formatCoins(pkg.coinAmount) }} {{ t('balance.coins') }}
-
                     <span v-if="pkg.popular" class="pkg-popular-tag">
                       <v-icon size="9">mdi-star</v-icon> {{ t('balance.popular') }}
                     </span>
@@ -108,7 +168,7 @@
             </div>
 
             <div v-else class="pkg-empty-state mb-2">
-              No exchange packages available for this currency.
+              {{ t('balance.noPackagesAvailable') }}
             </div>
 
             <!-- OR divider -->
@@ -181,12 +241,12 @@
           </div>
         </div>
 
-        <!-- ── C2B: Coins → Balance ── -->
+        <!-- ── C2B: Cash Out (Coins → Balance) ── -->
         <div v-else class="step-scroll-body">
           <div class="pa-4">
 
             <!-- Currency selector -->
-            <div class="slabel mb-2">Receive into</div>
+            <div class="slabel mb-2">{{ t('balance.receiveInto') }}</div>
             <div class="bar-outer mb-3">
               <button class="bar-arrow-btn" :class="{ hidden: balBarAtStart }" @click="scrollBalBar(-1)">
                 <v-icon size="13">mdi-chevron-left</v-icon>
@@ -199,8 +259,7 @@
                       :class="{ 'bar-bal-item-active': selectedCurrency === bal.currency_code }"
                       :disabled="isLoadingForm" @click="onSelectCurrency(bal.currency_code)">
                       <div class="bar-bal-code">{{ bal.currency_code }}</div>
-                      <div class="bar-bal-amount">{{ formatCurrencyByCode(toNumber(bal.amount), bal.currency_code) }}
-                      </div>
+                      <div class="bar-bal-amount">{{ formatCurrencyByCode(toNumber(bal.amount), bal.currency_code) }}</div>
                     </button>
                   </template>
                 </div>
@@ -214,7 +273,7 @@
             <div class="rate-bar mb-3">
               <v-icon size="13" color="#5fd4b0" class="mr-1">mdi-information-outline</v-icon>
               <span class="rate-text">
-                Rate: <strong>1 coin</strong> = {{ ratePerCoinFormatted }}
+                {{ t('balance.rate') }} <strong>{{ t('balance.oneCoin') }}</strong> = {{ ratePerCoinFormatted }}
               </span>
             </div>
 
@@ -222,18 +281,18 @@
             <div class="coin-balance-badge mb-3">
               <v-icon color="#fac775" size="20" class="mr-2">mdi-circle-multiple-outline</v-icon>
               <div>
-                <div class="balance-label">Available coins</div>
+                <div class="balance-label">{{ t('balance.availableCoins') }}</div>
                 <div class="balance-value">{{ formatCoins(currentCoinBalance) }}</div>
               </div>
             </div>
 
             <!-- Coin amount input -->
-            <div class="slabel mb-2">Coins to exchange</div>
+            <div class="slabel mb-2">{{ t('balance.coinsToCashOut') }}</div>
             <div class="inp-card mb-3" :class="{ 'inp-card-focus': c2bCoins > 0 }">
               <div class="inp-row">
                 <input v-model.number="c2bCoins" type="number" class="big-input" placeholder="0" min="100" step="100"
                   @input="onC2BInput" />
-                <span class="inp-unit">coins</span>
+                <span class="inp-unit">{{ t('balance.coins') }}</span>
               </div>
               <div class="inp-cost" :style="c2bCoins > 0 ? 'color:#44d7c5' : 'color:rgba(173,228,242,0.3)'">
                 {{ c2bCoins > 0 ? '≈ ' + formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) : '—' }}
@@ -244,56 +303,41 @@
               </div>
             </div>
 
-            <!-- Quick amounts -->
-            <!-- <div class="slabel mb-2">Quick select</div>
-            <div class="quick-row mb-3">
-              <button
-                v-for="amt in c2bQuickAmounts"
-                :key="amt"
-                class="quick-btn"
-                :class="{ 'quick-btn-active': c2bCoins === amt }"
-                @click="setC2BQuick(amt)"
-              >
-                {{ amt >= 1000 ? `${amt / 1000}k` : amt }}
-              </button>
-            </div> -->
-
             <!-- Summary -->
             <div v-if="c2bCoins >= 100 && !c2bErrorMsg" class="summary-row mt-1">
               <div>
-                <div class="summary-label">You spend</div>
+                <div class="summary-label">{{ t('balance.youSpend') }}</div>
                 <div class="summary-value" style="color:#fac775">
                   <v-icon size="13" color="#fac775">mdi-circle-multiple-outline</v-icon>
-                  {{ formatCoins(c2bCoins) }} coins
+                  {{ formatCoins(c2bCoins) }} {{ t('balance.coins') }}
                 </div>
               </div>
               <v-icon color="rgba(173,228,242,0.3)" size="17">mdi-arrow-right</v-icon>
               <div class="text-right">
-                <div class="summary-label">You receive</div>
-                <div class="summary-value" style="color:#44d7c5">{{ formatCurrencyByCode(c2bReceiveAmount,
-                  selectedCurrency) }}
+                <div class="summary-label">{{ t('balance.youReceive') }}</div>
+                <div class="summary-value" style="color:#44d7c5">
+                  {{ formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) }}
                 </div>
               </div>
             </div>
 
             <div v-if="c2bCoins >= 100 && !c2bErrorMsg" class="after-balance-row mt-2">
               <div class="ab-item">
-                <div class="ab-label">Coins after</div>
-                <div class="ab-value" style="color:#fac775">{{ formatCoins(Math.max(0, currentCoinBalance - c2bCoins))
-                  }}</div>
+                <div class="ab-label">{{ t('balance.coinsAfter') }}</div>
+                <div class="ab-value" style="color:#fac775">{{ formatCoins(Math.max(0, currentCoinBalance - c2bCoins)) }}</div>
               </div>
               <div class="ab-divider" />
               <div class="ab-item">
-                <div class="ab-label">{{ selectedCurrency }} after</div>
+                <div class="ab-label">{{ t('balance.currencyAfter', { currency: selectedCurrency }) }}</div>
                 <div class="ab-value" style="color:#44d7c5">{{ c2bAfterCurrencyBalance }}</div>
               </div>
             </div>
 
             <!-- Warning -->
-            <div class="warn-box mt-3">
+            <!-- <div class="warn-box mt-3">
               <v-icon size="13" color="#fac775" class="mt-1 flex-shrink-0">mdi-alert-triangle-outline</v-icon>
-              <span>This exchange is <strong>irreversible</strong>. Balance cannot be converted back to coins.</span>
-            </div>
+              <span>{{ t('balance.c2bWarning') }}</span>
+            </div> -->
 
           </div>
         </div>
@@ -315,8 +359,11 @@
               }) }}
             </template>
             <template v-else>
-              Exchange {{ formatCoins(c2bCoins) }} coins for {{ formatCurrencyByCode(c2bReceiveAmount, selectedCurrency)
-              }} into your {{ selectedCurrency }} balance.
+              {{ t('balance.cashOutConfirmMessage', {
+                coins: formatCoins(c2bCoins),
+                amount: formatCurrencyByCode(c2bReceiveAmount, selectedCurrency),
+                currency: selectedCurrency,
+              }) }}
             </template>
           </p>
 
@@ -348,26 +395,23 @@
           <div v-else class="confirm-detail-row">
             <div class="detail-item">
               <v-icon size="15" color="#fac775" class="mb-1">mdi-circle-multiple-outline</v-icon>
-              <div class="detail-label">Deducted</div>
+              <div class="detail-label">{{ t('balance.deducted') }}</div>
               <div class="detail-value" style="color:#fac775">-{{ formatCoins(c2bCoins) }}</div>
-              <div class="detail-sub">coins</div>
+              <div class="detail-sub">{{ t('balance.coins') }}</div>
             </div>
             <div class="detail-divider" />
             <div class="detail-item">
               <v-icon size="15" color="#44d7c5" class="mb-1">mdi-wallet-outline</v-icon>
-              <div class="detail-label">You receive</div>
-              <div class="detail-value" style="color:#44d7c5">+{{ formatCurrencyByCode(c2bReceiveAmount,
-                selectedCurrency) }}
-              </div>
+              <div class="detail-label">{{ t('balance.youReceive') }}</div>
+              <div class="detail-value" style="color:#44d7c5">+{{ formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) }}</div>
               <div class="detail-sub">{{ selectedCurrency }}</div>
             </div>
             <div class="detail-divider" />
             <div class="detail-item">
               <v-icon size="15" color="rgba(173,228,242,0.6)" class="mb-1">mdi-circle-multiple-outline</v-icon>
-              <div class="detail-label">Coins after</div>
-              <div class="detail-value" style="font-size:12px">{{ formatCoins(Math.max(0, currentCoinBalance -
-                c2bCoins)) }}</div>
-              <div class="detail-sub">remaining</div>
+              <div class="detail-label">{{ t('balance.coinsAfter') }}</div>
+              <div class="detail-value" style="font-size:12px">{{ formatCoins(Math.max(0, currentCoinBalance - c2bCoins)) }}</div>
+              <div class="detail-sub">{{ t('balance.remaining') }}</div>
             </div>
           </div>
 
@@ -377,7 +421,7 @@
                 {{ t('balance.warning', { currency: selectedCurrency }) }}
               </template>
               <template v-else>
-                Your coins will be deducted immediately. This action cannot be undone.
+                {{ t('balance.c2bConfirmWarning') }}
               </template>
             </span>
           </v-alert>
@@ -391,18 +435,17 @@
       <template v-else-if="currentStep === 'success'">
         <div class="success-body">
           <v-icon color="#44d7c5" size="52">mdi-check-circle-outline</v-icon>
-          <div class="success-title">Exchange successful!</div>
+          <div class="success-title">{{ t('balance.exchangeSuccessfulTitle') }}</div>
           <div class="success-pill">
-            <template v-if="activeTab === 'b2c'">+{{ formatCoins(b2cFinalCoins) }} coins</template>
+            <template v-if="activeTab === 'b2c'">+{{ formatCoins(b2cFinalCoins) }} {{ t('balance.coins') }}</template>
             <template v-else>+{{ formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) }}</template>
           </div>
           <div class="success-sub">
-            <template v-if="activeTab === 'b2c'">−{{ b2cFinalCostFormatted }} deducted from {{ selectedCurrency
-              }}</template>
-            <template v-else>−{{ formatCoins(c2bCoins) }} coins deducted</template>
+            <template v-if="activeTab === 'b2c'">−{{ b2cFinalCostFormatted }} {{ t('balance.deductedFrom', { currency: selectedCurrency }) }}</template>
+            <template v-else>−{{ formatCoins(c2bCoins) }} {{ t('balance.coinsDeducted') }}</template>
           </div>
           <v-btn variant="flat" class="ocean-btn-confirm mt-4" style="width:160px" @click="close">
-            <v-icon start size="15">mdi-check</v-icon> Done
+            <v-icon start size="15">mdi-check</v-icon> {{ t('common.done') }}
           </v-btn>
         </div>
       </template>
@@ -426,8 +469,7 @@
 
         <!-- Confirm step -->
         <template v-else-if="currentStep === 'confirm'">
-          <v-btn variant="outlined" color="rgba(173,228,242,0.4)" class="ocean-btn-cancel flex-grow-1"
-            @click="backToForm">
+          <v-btn variant="outlined" color="rgba(173,228,242,0.4)" class="ocean-btn-cancel flex-grow-1" @click="backToForm">
             <v-icon start size="15">mdi-arrow-left</v-icon>
             {{ t('common.back') }}
           </v-btn>
@@ -506,6 +548,32 @@ function onDialogUpdate(val: boolean) {
   if (!val) close()
 }
 
+// ─── Insufficient coins dialog state ──────────────────────────────────────────
+const insufficientCoinsVisible = ref(false)
+const insufficientBetAmount = ref(0)
+
+/**
+ * Call this from your game/bet logic to show the insufficient coins dialog.
+ * e.g. showInsufficientCoinsDialog(betAmount)
+ */
+function showInsufficientCoinsDialog(betAmount: number) {
+  insufficientBetAmount.value = betAmount
+  insufficientCoinsVisible.value = true
+}
+
+function closeInsufficientDialog() {
+  insufficientCoinsVisible.value = false
+}
+
+function openExchangeFromInsufficient() {
+  insufficientCoinsVisible.value = false
+  // Open exchange dialog on the top-up tab
+  activeTab.value = 'b2c'
+  internalVisible.value = true
+  emit('update:modelValue', true)
+  void openDialog()
+}
+
 // ─── Tab / Step state ──────────────────────────────────────────────────────────
 const activeTab = ref<TabMode>('b2c')
 const currentStep = ref<StepName>('form')
@@ -529,7 +597,6 @@ const customAmount = ref<number | null>(null)
 
 // ─── C2B state ─────────────────────────────────────────────────────────────────
 const c2bCoins = ref<number>(0)
-const c2bQuickAmounts = [200, 500, 1000, 2000, 5000]
 
 // ─── Balance bar scroll ────────────────────────────────────────────────────────
 const balBarRef = ref<HTMLElement | null>(null)
@@ -623,8 +690,8 @@ const c2bAfterCurrencyBalance = computed(() => {
 
 const c2bErrorMsg = computed(() => {
   if (c2bCoins.value <= 0) return ''
-  if (c2bCoins.value < 100) return 'Minimum 100 coins'
-  if (c2bCoins.value > currentCoinBalance.value) return 'Not enough coins'
+  if (c2bCoins.value < 100) return t('balance.minimumCoins')
+  if (c2bCoins.value > currentCoinBalance.value) return t('balance.notEnoughCoinsShort')
   return ''
 })
 
@@ -656,8 +723,8 @@ const headerIconClass = computed(() => {
 
 const headerTitle = computed(() => {
   if (currentStep.value === 'confirm') return t('balance.confirmTitle')
-  if (currentStep.value === 'success') return 'Exchange successful'
-  return activeTab.value === 'b2c' ? t('balance.exchangeTitle') : 'Coins → Balance'
+  if (currentStep.value === 'success') return t('balance.exchangeSuccessful')
+  return activeTab.value === 'b2c' ? t('balance.topUpCoins') : t('balance.cashOutCoins')
 })
 
 // ─── Watchers ─────────────────────────────────────────────────────────────────
@@ -686,14 +753,6 @@ function toNumber(v: unknown): number {
 
 function coinsToCost(coins: number): number {
   return Math.max(0, coins) * selectedExchangeRate.value
-}
-
-function getBalanceByCode(code: CurrencyCode): number {
-  const found = walletBalances.value.find(b => b.currency_code === code)
-  if (found) return toNumber(found.amount)
-  if (code === 'USD') return props.balanceUSD
-  if (code === 'KHR') return props.balanceKHR
-  return 0
 }
 
 function currencyIdByCode(code: CurrencyCode): number | null {
@@ -747,7 +806,7 @@ async function hydrateForms(targetCode?: CurrencyCode) {
     const targetCurrencyId = targetCode ? currencyIdByCode(targetCode) : null
     const coinFormResp = await getExchangeCoinForm(targetCurrencyId ?? undefined)
     const coinFormItem = coinFormResp?.data?.value?.data?.exchange_coin_form?.[0]
-    if (!coinFormItem) throw new Error('Exchange coin form is unavailable')
+    if (!coinFormItem) throw new Error(t('balance.exchangeCoinFormUnavailable'))
 
     syncCoinForm(coinFormItem)
 
@@ -769,7 +828,7 @@ async function hydrateForms(targetCode?: CurrencyCode) {
         : walletBalances.value
     }
   } catch (error: any) {
-    const msg = error?.message || error?.data?.error || 'Failed to load exchange form'
+    const msg = error?.message || error?.data?.error || t('balance.failedToLoadExchangeForm')
     sonnerToast(t('balance.loadFailed'), String(msg), 'error')
   } finally {
     isLoadingForm.value = false
@@ -794,7 +853,6 @@ async function loadPackages(currencyId: number) {
 // ─── Dialog flow ───────────────────────────────────────────────────────────────
 async function openDialog() {
   currentStep.value = 'form'
-  activeTab.value = 'b2c'
   resetSelection()
   await hydrateForms()
   nextTick(() => updateBalBarArrows())
@@ -823,10 +881,6 @@ function onSelectCurrency(code: CurrencyCode) {
   void hydrateForms(code)
 }
 
-function setC2BQuick(amt: number) {
-  c2bCoins.value = amt
-}
-
 function onC2BInput() {
   // reactivity handles the rest via computed
 }
@@ -850,7 +904,7 @@ async function confirmExchange() {
     }
     currentStep.value = 'success'
   } catch (error: any) {
-    const msg = error?.error || error?.message || 'Something went wrong. Please try again.'
+    const msg = error?.error || error?.message || t('balance.genericExchangeError')
     sonnerToast(t('balance.exchangeFailed'), String(msg), 'error')
   } finally {
     purchasing.value = false
@@ -888,7 +942,7 @@ async function doBuyCoins() {
 
   sonnerToast(
     t('balance.exchangeSuccessful'),
-    `+${formatCoins(coinReceived)} coins · -${formatCurrencyByCode(exchangedAmount, selectedCurrency.value)}`,
+    `+${formatCoins(coinReceived)} ${t('balance.coins')} · -${formatCurrencyByCode(exchangedAmount, selectedCurrency.value)}`,
     'success',
   )
 
@@ -917,8 +971,8 @@ async function doSellCoins() {
   })
 
   sonnerToast(
-    'Exchange successful',
-    `+${formatCurrencyByCode(balanceReceived, selectedCurrency.value)} · -${formatCoins(coinExchanged)} coins`,
+    t('balance.cashOutSuccessful'),
+    `+${formatCurrencyByCode(balanceReceived, selectedCurrency.value)} · -${formatCoins(coinExchanged)} ${t('balance.coins')}`,
     'success',
   )
 
@@ -955,6 +1009,9 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   if (code === 'KHR') return `${safe.toFixed(3)}៛`
   return `${safe.toFixed(4)} ${code}`
 }
+
+// ─── Expose for parent use ─────────────────────────────────────────────────────
+defineExpose({ showInsufficientCoinsDialog })
 </script>
 
 <style scoped>
@@ -1012,36 +1069,109 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
 
 .exchange-tab {
   flex: 1;
-  padding: 11px 8px;
+  padding: 10px 8px;
   border: none;
   background: transparent;
   color: rgba(173, 228, 242, 0.4);
-  font-size: 13px;
-  font-weight: 500;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
   border-bottom: 2px solid transparent;
   transition: all 0.2s;
 }
 
 .exchange-tab:hover {
-  color: rgba(173, 228, 242, 0.75);
   background: rgba(255, 255, 255, 0.03);
 }
 
+.tab-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
+.tab-icon-wrap {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.tab-icon-b2c {
+  background: rgba(68, 215, 197, 0.08);
+  border: 1px solid rgba(68, 215, 197, 0.18);
+  color: rgba(68, 215, 197, 0.5);
+}
+
+.tab-icon-c2b {
+  background: rgba(250, 199, 117, 0.08);
+  border: 1px solid rgba(250, 199, 117, 0.18);
+  color: rgba(250, 199, 117, 0.5);
+}
+
+.tab-text-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.tab-label {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: rgba(173, 228, 242, 0.45);
+  transition: color 0.2s;
+}
+
+.tab-desc {
+  font-size: 10px;
+  color: rgba(173, 228, 242, 0.28);
+  letter-spacing: 0.04em;
+  transition: color 0.2s;
+}
+
+/* B2C active */
 .tab-active-b2c {
-  color: #44d7c5 !important;
   border-bottom-color: #44d7c5 !important;
   background: rgba(68, 215, 197, 0.06) !important;
 }
 
+.tab-active-b2c .tab-label {
+  color: #44d7c5;
+}
+
+.tab-active-b2c .tab-desc {
+  color: rgba(68, 215, 197, 0.55);
+}
+
+.tab-active-b2c .tab-icon-b2c {
+  background: rgba(68, 215, 197, 0.15);
+  border-color: rgba(68, 215, 197, 0.4);
+  color: #44d7c5;
+}
+
+/* C2B active */
 .tab-active-c2b {
-  color: #fac775 !important;
   border-bottom-color: #fac775 !important;
   background: rgba(250, 199, 117, 0.05) !important;
+}
+
+.tab-active-c2b .tab-label {
+  color: #fac775;
+}
+
+.tab-active-c2b .tab-desc {
+  color: rgba(250, 199, 117, 0.55);
+}
+
+.tab-active-c2b .tab-icon-c2b {
+  background: rgba(250, 199, 117, 0.15);
+  border-color: rgba(250, 199, 117, 0.4);
+  color: #fac775;
 }
 
 /* ── Scrollable body ─────────────────────────────────────────────────────────── */
@@ -1099,9 +1229,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   padding: 2px 0;
 }
 
-.bar-scroll-track::-webkit-scrollbar {
-  display: none;
-}
+.bar-scroll-track::-webkit-scrollbar { display: none; }
 
 .bar-bal-item {
   display: flex;
@@ -1117,14 +1245,8 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   transition: background 0.15s;
 }
 
-.bar-bal-item:hover {
-  background: rgba(29, 158, 117, 0.08);
-}
-
-.bar-bal-item:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
+.bar-bal-item:hover { background: rgba(29, 158, 117, 0.08); }
+.bar-bal-item:disabled { cursor: wait; opacity: 0.7; }
 
 .bar-bal-item-active {
   background: rgba(68, 215, 197, 0.12);
@@ -1139,9 +1261,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   margin-bottom: 1px;
 }
 
-.bar-bal-item-active .bar-bal-code {
-  color: rgba(173, 228, 242, 0.78);
-}
+.bar-bal-item-active .bar-bal-code { color: rgba(173, 228, 242, 0.78); }
 
 .bar-bal-amount {
   font-size: 13px;
@@ -1150,9 +1270,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   line-height: 1.3;
 }
 
-.bar-bal-item-active .bar-bal-amount {
-  color: #9ff6dd;
-}
+.bar-bal-item-active .bar-bal-amount { color: #9ff6dd; }
 
 .bar-sep {
   width: 1px;
@@ -1206,11 +1324,9 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   color: rgba(95, 212, 176, 0.8);
 }
 
-.rate-text strong {
-  color: #5fd4b0;
-}
+.rate-text strong { color: #5fd4b0; }
 
-/* ── Coin balance badge (c2b) ────────────────────────────────────────────────── */
+/* ── Coin balance badge ───────────────────────────────────────────────────────── */
 .coin-balance-badge {
   display: flex;
   align-items: center;
@@ -1232,7 +1348,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   color: #fac775;
 }
 
-/* ── Input card (c2b big input) ──────────────────────────────────────────────── */
+/* ── Input card ──────────────────────────────────────────────────────────────── */
 .inp-card {
   background: rgba(5, 20, 38, 0.8);
   border: 1.5px solid rgba(58, 168, 232, 0.18);
@@ -1241,9 +1357,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   transition: border-color 0.15s;
 }
 
-.inp-card-focus {
-  border-color: rgba(68, 215, 197, 0.45);
-}
+.inp-card-focus { border-color: rgba(68, 215, 197, 0.45); }
 
 .inp-row {
   display: flex;
@@ -1265,13 +1379,9 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
 }
 
 .big-input::-webkit-outer-spin-button,
-.big-input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-}
+.big-input::-webkit-inner-spin-button { -webkit-appearance: none; }
 
-.big-input::placeholder {
-  color: rgba(173, 228, 242, 0.18);
-}
+.big-input::placeholder { color: rgba(173, 228, 242, 0.18); }
 
 .inp-unit {
   font-size: 12px;
@@ -1284,36 +1394,6 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   font-weight: 600;
   min-height: 18px;
   margin-top: 3px;
-}
-
-/* ── Quick select ────────────────────────────────────────────────────────────── */
-.quick-row {
-  display: flex;
-  gap: 5px;
-  flex-wrap: wrap;
-}
-
-.quick-btn {
-  padding: 4px 11px;
-  border-radius: 7px;
-  border: 1px solid rgba(68, 215, 197, 0.22);
-  background: rgba(68, 215, 197, 0.06);
-  color: rgba(95, 212, 176, 0.8);
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.quick-btn:hover {
-  background: rgba(68, 215, 197, 0.14);
-  border-color: rgba(68, 215, 197, 0.4);
-  color: #44d7c5;
-}
-
-.quick-btn-active {
-  background: rgba(68, 215, 197, 0.18) !important;
-  border-color: rgba(68, 215, 197, 0.55) !important;
-  color: #9ff6dd !important;
 }
 
 /* ── Packages ────────────────────────────────────────────────────────────────── */
@@ -1372,9 +1452,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   background: linear-gradient(180deg, #44d7c5, #378add) !important;
 }
 
-.pkg-popular {
-  border-color: rgba(250, 199, 117, 0.32);
-}
+.pkg-popular { border-color: rgba(250, 199, 117, 0.32); }
 
 .pkg-popular.pkg-selected {
   border-color: rgba(250, 199, 117, 0.7) !important;
@@ -1408,10 +1486,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   border-color: rgba(250, 199, 117, 0.28);
 }
 
-.pkg-info {
-  flex: 1;
-  min-width: 0;
-}
+.pkg-info { flex: 1; min-width: 0; }
 
 .pkg-title {
   font-size: 13px;
@@ -1440,10 +1515,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   border-radius: 4px;
 }
 
-.pkg-right {
-  text-align: right;
-  flex-shrink: 0;
-}
+.pkg-right { text-align: right; flex-shrink: 0; }
 
 .pkg-price {
   font-size: 13px;
@@ -1489,15 +1561,10 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   transition: all 0.15s;
 }
 
-.pkg-selected .pkg-check-inner {
-  opacity: 1;
-  transform: scale(1);
-}
+.pkg-selected .pkg-check-inner { opacity: 1; transform: scale(1); }
 
 /* ── Custom amount ───────────────────────────────────────────────────────────── */
-.custom-pkg-card {
-  cursor: default;
-}
+.custom-pkg-card { cursor: default; }
 
 .custom-label {
   font-size: 10px;
@@ -1525,13 +1592,9 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
 }
 
 .custom-input::-webkit-outer-spin-button,
-.custom-input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-}
+.custom-input::-webkit-inner-spin-button { -webkit-appearance: none; }
 
-.custom-input::placeholder {
-  color: rgba(173, 228, 242, 0.18);
-}
+.custom-input::placeholder { color: rgba(173, 228, 242, 0.18); }
 
 .custom-unit {
   font-size: 11px;
@@ -1601,16 +1664,9 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   overflow: hidden;
 }
 
-.ab-item {
-  flex: 1;
-  padding: 7px 12px;
-  text-align: center;
-}
+.ab-item { flex: 1; padding: 7px 12px; text-align: center; }
 
-.ab-divider {
-  width: 1px;
-  background: rgba(58, 168, 232, 0.14);
-}
+.ab-divider { width: 1px; background: rgba(58, 168, 232, 0.14); }
 
 .ab-label {
   font-size: 10px;
@@ -1619,10 +1675,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   margin-bottom: 2px;
 }
 
-.ab-value {
-  font-size: 13px;
-  font-weight: 600;
-}
+.ab-value { font-size: 13px; font-weight: 600; }
 
 /* ── Warning box ─────────────────────────────────────────────────────────────── */
 .warn-box {
@@ -1655,10 +1708,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   text-align: center;
 }
 
-.detail-divider {
-  width: 1px;
-  background: rgba(58, 168, 232, 0.18);
-}
+.detail-divider { width: 1px; background: rgba(58, 168, 232, 0.18); }
 
 .detail-label {
   font-size: 10px;
@@ -1666,11 +1716,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   margin-bottom: 3px;
 }
 
-.detail-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: #edf9ff;
-}
+.detail-value { font-size: 14px; font-weight: 600; color: #edf9ff; }
 
 .detail-sub {
   font-size: 10px;
@@ -1688,11 +1734,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   text-align: center;
 }
 
-.success-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: #edf9ff;
-}
+.success-title { font-size: 17px; font-weight: 600; color: #edf9ff; }
 
 .success-pill {
   background: rgba(68, 215, 197, 0.12);
@@ -1704,10 +1746,7 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   color: #44d7c5;
 }
 
-.success-sub {
-  font-size: 13px;
-  color: rgba(173, 228, 242, 0.65);
-}
+.success-sub { font-size: 13px; color: rgba(173, 228, 242, 0.65); }
 
 /* ── Buttons ─────────────────────────────────────────────────────────────────── */
 .ocean-btn-cancel {
@@ -1729,6 +1768,118 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   background: linear-gradient(135deg, #d85a30, #993c1d) !important;
   color: #fff !important;
   font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+/* ── Insufficient coins dialog ───────────────────────────────────────────────── */
+.insufficient-card {
+  border-color: rgba(240, 149, 149, 0.35) !important;
+}
+
+.insufficient-body {
+  padding: 28px 22px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.insufficient-icon-wrap {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.insufficient-icon-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(250, 199, 117, 0.1);
+  border: 1.5px solid rgba(250, 199, 117, 0.3);
+  animation: pulse-ring 2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.6; }
+}
+
+.insufficient-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #edf9ff;
+  letter-spacing: -0.01em;
+}
+
+.insufficient-desc {
+  font-size: 13px;
+  color: rgba(173, 228, 242, 0.62);
+  line-height: 1.6;
+  max-width: 280px;
+}
+
+.insufficient-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(5, 25, 40, 0.7);
+  border: 1px solid rgba(58, 168, 232, 0.18);
+  border-radius: 14px;
+  padding: 12px 16px;
+  width: 100%;
+  justify-content: center;
+}
+
+.insuf-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 80px;
+}
+
+.insuf-stat-label {
+  font-size: 10px;
+  color: rgba(173, 228, 242, 0.42);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.insuf-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.insuf-stat-unit {
+  font-size: 10px;
+  color: rgba(173, 228, 242, 0.35);
+}
+
+.insuf-arrow { flex-shrink: 0; }
+
+.insufficient-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.insuf-exchange-btn {
+  width: 100%;
+  height: 44px !important;
+  font-size: 14px !important;
+}
+
+.insuf-cancel-btn {
+  color: rgba(173, 228, 242, 0.4) !important;
+  font-size: 12px !important;
   text-transform: none;
   letter-spacing: 0.02em;
 }

@@ -922,7 +922,7 @@ export function createFishContextMachine(options: {
         isExiting: Boolean(saved.is_exiting),
         exitTarget:
           Number.isFinite(saved.exit_target_x) &&
-          Number.isFinite(saved.exit_target_y)
+            Number.isFinite(saved.exit_target_y)
             ? new PIXI.Point(saved.exit_target_x!, saved.exit_target_y!)
             : undefined,
         exitSpeed:
@@ -1351,12 +1351,15 @@ export function createFishContextMachine(options: {
       isDying?: boolean;
       __isDying?: boolean;
       __isDeadFish?: boolean;
+      x: number;
+      y: number;
+      alpha: number;
+      rotation: number;
     };
 
     if (tagged.isDying || tagged.__isDying) return;
     tagged.isDying = true;
     tagged.__isDying = true;
-    // (obj as any).__isDeadFish = true;
     tagged.__isDeadFish = true;
 
     if (liveIndex >= 0) {
@@ -1364,21 +1367,29 @@ export function createFishContextMachine(options: {
     }
 
     const obj = display as PIXI.Container;
-    // (obj as any).__isDeadFish = true;
-
-    const startScX = obj.scale.x;
-    const startScY = obj.scale.y;
 
     // Stop swimming animation if it's an AnimatedSprite
     const anim = (obj as any).__anim as PIXI.AnimatedSprite | undefined;
     if (anim && !anim.destroyed) anim.stop();
 
-    const POP_MS = 180; // scale up to peak
-    const BOUNCE_MS = 150; // bounce back to normal
-    const HOLD_MS = 100; // hold at normal
-    const FADE_MS = 350; // fade out
-    const TOTAL_MS = POP_MS + BOUNCE_MS + HOLD_MS + FADE_MS;
-    const PEAK = 1.35;
+    const startX = obj.x;
+    const startY = obj.y;
+    const startRot = obj.rotation ?? 0;
+    const startAlpha = obj.alpha ?? 1;
+
+    const SHOCK_MS = 90;
+    const DROP_MS = 210;
+    const PANIC_MS = 260;
+    const FADE_MS = 240;
+    const TOTAL_MS = SHOCK_MS + DROP_MS + PANIC_MS + FADE_MS;
+
+    const SHOCK_LIFT = 18;
+    const BOUNCE_DEPTH = 6;
+
+    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+    const easeInOut = (t: number) => t < 0.5
+      ? 4 * t * t * t
+      : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
     let elapsed = 0;
 
@@ -1391,32 +1402,58 @@ export function createFishContextMachine(options: {
 
       elapsed += PIXI.Ticker.shared.elapsedMS;
 
-      if (elapsed < POP_MS) {
-        // Scale up to peak
-        const t = elapsed / POP_MS;
-        const ease = 1 - Math.pow(1 - t, 3);
-        const sc = 1 + (PEAK - 1) * ease;
-        obj.scale.set(startScX * sc, startScY * sc);
-      } else if (elapsed < POP_MS + BOUNCE_MS) {
-        // Bounce back to normal size
-        const t = (elapsed - POP_MS) / BOUNCE_MS;
-        const ease = 1 - Math.pow(1 - t, 3);
-        const sc = PEAK - (PEAK - 1) * ease; // PEAK → 1.0
-        obj.scale.set(startScX * sc, startScY * sc);
-      } else if (elapsed < POP_MS + BOUNCE_MS + HOLD_MS) {
-        // Hold at normal size, frozen
-        obj.scale.set(startScX, startScY);
-      } else {
-        // Fade out
-        const t = (elapsed - POP_MS - BOUNCE_MS - HOLD_MS) / FADE_MS;
-        obj.alpha = Math.max(0, 1 - t);
-        obj.scale.set(startScX, startScY);
+      // Phase 1 — shock: shake sideways + lift up
+      if (elapsed <= SHOCK_MS) {
+        const t = Math.min(elapsed / SHOCK_MS, 1);
+        obj.x = startX + Math.sin(t * Math.PI * 5) * 5 * (1 - t * 0.35);
+        obj.y = startY - SHOCK_LIFT * easeOut(t);
+        obj.rotation = startRot + Math.sin(t * Math.PI * 4) * 0.08 * (1 - t);
+        obj.alpha = startAlpha;
+        return;
       }
 
-      if (elapsed >= TOTAL_MS) {
-        PIXI.Ticker.shared.remove(onKill);
-        cleanup();
+      // Phase 2 — drop: fall back down with a small bounce
+      if (elapsed <= SHOCK_MS + DROP_MS) {
+        const t = Math.min((elapsed - SHOCK_MS) / DROP_MS, 1);
+        obj.x = startX + Math.sin(t * Math.PI * 6) * 1.5 * (1 - t);
+        if (t < 0.78) {
+          obj.y = startY - SHOCK_LIFT + (SHOCK_LIFT + BOUNCE_DEPTH) * easeInOut(t / 0.78);
+        } else {
+          obj.y = startY + BOUNCE_DEPTH * (1 - easeOut((t - 0.78) / 0.22));
+        }
+        obj.rotation = startRot + Math.sin(t * Math.PI * 3) * 0.04 * (1 - t);
+        obj.alpha = startAlpha;
+        return;
       }
+
+      // Phase 3 & 4 — panic wiggle, then fade out
+      const panicElapsed = elapsed - SHOCK_MS - DROP_MS;
+      const wave = panicElapsed * 0.07;
+      obj.x = startX + Math.sin(wave * 2.6) * 4;
+      obj.y = startY + Math.sin(wave) * 2;
+      obj.rotation = startRot + Math.sin(wave * 1.8) * 0.05;
+
+      // Speed up the swim cycle during panic
+      const animSprite = (obj as any).__anim as PIXI.AnimatedSprite | undefined;
+      if (animSprite && !animSprite.destroyed) {
+        animSprite.animationSpeed = Math.max(
+          2.4,
+          ((obj as any).__walkAnimSpeed ?? 1) * 2.8,
+        );
+        if (!animSprite.playing) animSprite.play();
+      }
+
+      if (panicElapsed > PANIC_MS) {
+        const fadeT = Math.min((panicElapsed - PANIC_MS) / FADE_MS, 1);
+        obj.alpha = startAlpha * (1 - easeOut(fadeT));
+      } else {
+        obj.alpha = startAlpha;
+      }
+
+      if (elapsed < TOTAL_MS) return;
+
+      PIXI.Ticker.shared.remove(onKill);
+      cleanup();
     };
 
     const cleanup = () => {
@@ -1427,7 +1464,6 @@ export function createFishContextMachine(options: {
 
     PIXI.Ticker.shared.add(onKill);
   }
-
   return {
     start,
     destroy,

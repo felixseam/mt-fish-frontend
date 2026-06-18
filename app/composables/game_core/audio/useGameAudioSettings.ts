@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { useGameAudio } from "~/composables/game_core/audio/useGameAudio";
 
 const STORAGE_KEY = "game_audio_muted";
 const mutedState = ref(false);
@@ -11,6 +12,8 @@ function readStoredMutedState() {
 
 function applyMutedState(nextMuted: boolean) {
   if (!import.meta.client) return;
+
+  useGameAudio().setMuted(nextMuted);
 
   for (const media of document.querySelectorAll<HTMLMediaElement>("audio, video")) {
     media.muted = nextMuted;

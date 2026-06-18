@@ -116,8 +116,8 @@ export const DEFAULT_AVATAR_URLS = [
 ] as const;
 
 // ── Icon button ───────────────────────────────────────────────────────────────
-export const ICON_BUTTON_ATLAS_URL = "/icon_button/icon_button.json";
-export const ICON_BUTTON_IMAGE_URL = "/icon_button/icon_button.png";
+export const ICON_BUTTON_ATLAS_URL = "/icon_button/button.json";
+export const ICON_BUTTON_IMAGE_URL = "/icon_button/button.png";
 
 // ── Internal types ────────────────────────────────────────────────────────────
 type ApiRenderState = {
