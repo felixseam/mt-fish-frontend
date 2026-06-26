@@ -874,11 +874,11 @@ export function createFishContextMachine(options: {
         continue;
       }
 
-      // ── Read raw factory scale BEFORE touching it — same as spawnFish ──────
+      // Read raw factory scale BEFORE touching it — same as spawnFish
       const baseScaleX = (handle.display as PIXI.Container).scale.x || 1;
       const baseScaleY = (handle.display as PIXI.Container).scale.y || 1;
 
-      // ── Tag it ───────────────────────────────────────────────────────────────
+      // Tag it
       const d = handle.display as PIXI.Container & {
         __baseScaleX?: number;
         __baseScaleY?: number;
@@ -886,7 +886,7 @@ export function createFishContextMachine(options: {
       d.__baseScaleX = baseScaleX;
       d.__baseScaleY = baseScaleY;
 
-      // ── Apply childScale on top — identical to spawnFish ─────────────────────
+      // Apply childScale on top — identical to spawnFish
       const childScale = getFishChildScale();
       const uniformChildScale = Math.min(childScale.x, childScale.y);
       (handle.display as PIXI.Container).scale.set(
@@ -922,7 +922,7 @@ export function createFishContextMachine(options: {
         isExiting: Boolean(saved.is_exiting),
         exitTarget:
           Number.isFinite(saved.exit_target_x) &&
-            Number.isFinite(saved.exit_target_y)
+          Number.isFinite(saved.exit_target_y)
             ? new PIXI.Point(saved.exit_target_x!, saved.exit_target_y!)
             : undefined,
         exitSpeed:
@@ -1079,7 +1079,7 @@ export function createFishContextMachine(options: {
       pendingContextSwitch.activateAtMs += pausedDuration;
     }
 
-    // ── Clamp contextStartTime so elapsed never overshoots ──────────────────
+    // Clamp contextStartTime so elapsed never overshoots
     // If the context would have expired during pause, reset it so it runs
     // from a fresh start rather than immediately triggering scheduleNextContext
     const resumeElapsed = performance.now() - contextStartTime;
@@ -1362,15 +1362,17 @@ export function createFishContextMachine(options: {
     tagged.__isDying = true;
     tagged.__isDeadFish = true;
 
-    if (liveIndex >= 0) {
-      liveFish.splice(liveIndex, 1);
-    }
+    if (liveIndex >= 0) liveFish.splice(liveIndex, 1);
 
     const obj = display as PIXI.Container;
+    const rawAnim = (obj as any).__anim;
 
-    // Stop swimming animation if it's an AnimatedSprite
-    const anim = (obj as any).__anim as PIXI.AnimatedSprite | undefined;
-    if (anim && !anim.destroyed) anim.stop();
+    // Stop initial animation cleanly for both types
+    if (rawAnim instanceof PIXI.AnimatedSprite) {
+      if (!rawAnim.destroyed) rawAnim.stop();
+    } else if (rawAnim instanceof Spine) {
+      if (!rawAnim.destroyed) rawAnim.state.timeScale = 0;
+    }
 
     const startX = obj.x;
     const startY = obj.y;
@@ -1382,14 +1384,12 @@ export function createFishContextMachine(options: {
     const PANIC_MS = 260;
     const FADE_MS = 240;
     const TOTAL_MS = SHOCK_MS + DROP_MS + PANIC_MS + FADE_MS;
-
     const SHOCK_LIFT = 18;
     const BOUNCE_DEPTH = 6;
 
     const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
-    const easeInOut = (t: number) => t < 0.5
-      ? 4 * t * t * t
-      : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    const easeInOut = (t: number) =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
     let elapsed = 0;
 
@@ -1402,7 +1402,7 @@ export function createFishContextMachine(options: {
 
       elapsed += PIXI.Ticker.shared.elapsedMS;
 
-      // Phase 1 — shock: shake sideways + lift up
+      // Phase 1 — shock
       if (elapsed <= SHOCK_MS) {
         const t = Math.min(elapsed / SHOCK_MS, 1);
         obj.x = startX + Math.sin(t * Math.PI * 5) * 5 * (1 - t * 0.35);
@@ -1412,12 +1412,15 @@ export function createFishContextMachine(options: {
         return;
       }
 
-      // Phase 2 — drop: fall back down with a small bounce
+      // Phase 2 — drop
       if (elapsed <= SHOCK_MS + DROP_MS) {
         const t = Math.min((elapsed - SHOCK_MS) / DROP_MS, 1);
         obj.x = startX + Math.sin(t * Math.PI * 6) * 1.5 * (1 - t);
         if (t < 0.78) {
-          obj.y = startY - SHOCK_LIFT + (SHOCK_LIFT + BOUNCE_DEPTH) * easeInOut(t / 0.78);
+          obj.y =
+            startY -
+            SHOCK_LIFT +
+            (SHOCK_LIFT + BOUNCE_DEPTH) * easeInOut(t / 0.78);
         } else {
           obj.y = startY + BOUNCE_DEPTH * (1 - easeOut((t - 0.78) / 0.22));
         }
@@ -1426,21 +1429,29 @@ export function createFishContextMachine(options: {
         return;
       }
 
-      // Phase 3 & 4 — panic wiggle, then fade out
+      // Phase 3 & 4 — panic wiggle + fade
       const panicElapsed = elapsed - SHOCK_MS - DROP_MS;
       const wave = panicElapsed * 0.07;
       obj.x = startX + Math.sin(wave * 2.6) * 4;
       obj.y = startY + Math.sin(wave) * 2;
       obj.rotation = startRot + Math.sin(wave * 1.8) * 0.05;
 
-      // Speed up the swim cycle during panic
-      const animSprite = (obj as any).__anim as PIXI.AnimatedSprite | undefined;
-      if (animSprite && !animSprite.destroyed) {
-        animSprite.animationSpeed = Math.max(
-          2.4,
-          ((obj as any).__walkAnimSpeed ?? 1) * 2.8,
-        );
-        if (!animSprite.playing) animSprite.play();
+      // Panic anim speed — branched by type
+      const anim = (obj as any).__anim;
+      if (anim && !anim.destroyed) {
+        if (anim instanceof PIXI.AnimatedSprite) {
+          anim.animationSpeed = Math.max(
+            2.4,
+            ((obj as any).__walkAnimSpeed ?? 1) * 2.8,
+          );
+          if (!anim.playing) anim.play();
+        } else if (anim instanceof Spine) {
+          // speed up spine time scale during panic
+          anim.state.timeScale = Math.max(
+            2.4,
+            ((obj as any).__baseAnimSpeed ?? 1) * 2.8,
+          );
+        }
       }
 
       if (panicElapsed > PANIC_MS) {

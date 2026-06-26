@@ -1050,6 +1050,7 @@ export function useFishGameplayScene() {
 
   function destroy() {
     pendingWhilePaused = [];
+    onSessionSyncLostHandler = null;
     if (pauseReloadTimer) {
       clearTimeout(pauseReloadTimer);
       pauseReloadTimer = null;
