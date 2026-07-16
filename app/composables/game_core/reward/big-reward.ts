@@ -5,15 +5,12 @@ import {
   COIN_ATLAS_URL,
 } from "~/composables/game_core/assets/useFishAssetPreload";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// Constants
 const ODD_FONT_NAME = "fnt_odd";
 
-// ── Atlas frame names ─────────────────────────────────────────────────────────
-// effect.atlas.txt
-const BIG_COIN_EFFECT_FRAME = "s_coin0001.png";
-
-// coin.atlas.txt
-const SMALL_COIN_FRAME = "ef_coin0_only0000.png";
+// Atlas frame names
+const BIG_COIN_EFFECT_FRAME = "s_coin0001.png"; // effect.atlas.txt
+const SMALL_COIN_FRAME = "ef_coin0_only0000.png"; // used for scattered z:3 coins
 
 const EXPLODE_FRAMES = [
   "ef_coin_0001.png",
@@ -46,16 +43,55 @@ const BIG_COIN_FRAMES = [
   "s_coin0009.png",
 ] as const;
 
-// ── Timing ────────────────────────────────────────────────────────────────────
-const INTRO_MS = 380;
-const POP_MS = 280;
+// Small coin animation frames — same set used by useRewardEffect.ts for the
+// normal reward coin. Reused here for the fullscreen shower.
+const COIN_FRAMES = [
+  "ef_coin0_only0000.png",
+  "ef_coin0_only0001.png",
+  "ef_coin0_only0002.png",
+  "ef_coin0_only0003.png",
+  "ef_coin0_only0004.png",
+  "ef_coin0_only0005.png",
+  "ef_coin0_only0006.png",
+  "ef_coin0_only0007.png",
+  "ef_coin0_only0008.png",
+  "ef_coin0_only0009.png",
+] as const;
+
+// Timing / sizing
 const COIN_COUNT = 5;
 const CIRCLE_RADIUS = 60;
 const EXPLODE_COUNT = 10;
 const COIN_BASE_SCALE = 0.65;
-const COIN_ROUNDS = 3; // full animation loops before freezing
+const COIN_ROUNDS = 3;
+const POP_MS = 280;
 
-// ── Easing ────────────────────────────────────────────────────────────────────
+// Master scale for the whole reward visual (coin ring + win/amount label).
+// This is the ONLY place to touch to resize the entire presentation — the
+// coin ring and label are both children of one container (`rewardVisual`)
+// so they always scale together in proportion.
+const REWARD_VISUAL_SCALE = 1.2;
+
+// Screen shake config
+const SHAKE_DURATION_MS = 900;
+const SHAKE_MAGNITUDE_PX = 22;
+const SHAKE_FREQUENCY = 1.9;
+
+// Fullscreen diamond-cluster shower config
+// const SHOWER_CLUSTER_COUNT = 8;
+const SHOWER_CLUSTER_SPACING = 25; // size of each diamond cluster
+const SHOWER_CLUSTER_MIN_GAP = 150; // min distance between cluster centers
+const SHOWER_COIN_STAGGER_MS = 40;
+const SHOWER_CLUSTER_WAVE_MS = 350;
+const SHOWER_POP_MS = 240;
+const SHOWER_HOLD_MS = 500;
+const SHOWER_SCALE_MIN = 0.5;
+const SHOWER_SCALE_MAX = 0.85;
+const SHOWER_FLY_DURATION_MS = 600;
+const SHOWER_FLY_STAGGER_MS = 12;
+const SHOWER_AVOID_RADIUS = 170; // keep-clear zone around the reward label
+
+// Easing
 function easeOutBack(t: number): number {
   const c1 = 1.70158,
     c3 = c1 + 1;
@@ -68,7 +104,333 @@ function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
-// ── Public types ──────────────────────────────────────────────────────────────
+// Reward-size tiers
+// Bigger wins → more diamond clusters + longer/harder shake.
+// Tune thresholds/values here only.
+type ShowerTier = {
+  clusterCount: number;
+  shakeDurationMs: number;
+  shakeMagnitudePx: number;
+};
+
+function getShowerTier(amount: number): ShowerTier {
+  if (amount >= 100_000)
+    return { clusterCount: 14, shakeDurationMs: 1400, shakeMagnitudePx: 32 };
+  if (amount >= 50_000)
+    return { clusterCount: 11, shakeDurationMs: 1100, shakeMagnitudePx: 26 };
+  if (amount >= 10_000)
+    return { clusterCount: 8, shakeDurationMs: 900, shakeMagnitudePx: 22 };
+  return { clusterCount: 5, shakeDurationMs: 600, shakeMagnitudePx: 16 };
+}
+
+// Screen shake
+// Shakes `target` (pass sceneRoot / stage — NOT fishLayer, since shaking
+// fishLayer would offset fish visuals relative to their collision bounds).
+function triggerScreenShake(
+  target: PIXI.Container,
+  durationMs: number = SHAKE_DURATION_MS,
+  magnitude: number = SHAKE_MAGNITUDE_PX,
+): void {
+  const tagged = target as PIXI.Container & {
+    __shakeBaseX?: number;
+    __shakeBaseY?: number;
+    __shakeTick?: () => void;
+  };
+
+  if (tagged.__shakeTick) {
+    PIXI.Ticker.shared.remove(tagged.__shakeTick);
+    if (tagged.__shakeBaseX !== undefined) target.x = tagged.__shakeBaseX;
+    if (tagged.__shakeBaseY !== undefined) target.y = tagged.__shakeBaseY;
+  }
+
+  const baseX = tagged.__shakeBaseX ?? target.x;
+  const baseY = tagged.__shakeBaseY ?? target.y;
+  tagged.__shakeBaseX = baseX;
+  tagged.__shakeBaseY = baseY;
+
+  let elapsed = 0;
+  let seed = Math.random() * 1000;
+
+  const onShake = () => {
+    if (target.destroyed) {
+      PIXI.Ticker.shared.remove(onShake);
+      return;
+    }
+
+    elapsed += PIXI.Ticker.shared.elapsedMS;
+    const t = Math.min(elapsed / durationMs, 1);
+    const decay = t < 0.15 ? 1 : Math.pow(1 - (t - 0.15) / 0.85, 1.6);
+
+    seed += PIXI.Ticker.shared.elapsedMS * 0.001 * SHAKE_FREQUENCY * 60;
+    target.x = baseX + Math.sin(seed * 1.7) * magnitude * decay;
+    target.y = baseY + Math.cos(seed * 2.3) * magnitude * decay * 0.7;
+
+    if (t >= 1) {
+      PIXI.Ticker.shared.remove(onShake);
+      target.x = baseX;
+      target.y = baseY;
+      tagged.__shakeTick = undefined;
+    }
+  };
+
+  tagged.__shakeTick = onShake;
+  PIXI.Ticker.shared.add(onShake);
+}
+
+// Diamond cluster shape (13 coins in a rhombus), reused per shower burst
+const SHOWER_DIAMOND_ROWS = 4; // was implicitly 2 (rows -2..2) — now -4..4, more coins per cluster
+
+function getDiamondClusterOffsets(): { x: number; y: number; delay: number }[] {
+  const pts: { x: number; y: number; delay: number }[] = [];
+  for (let r = -SHOWER_DIAMOND_ROWS; r <= SHOWER_DIAMOND_ROWS; r++) {
+    const span = SHOWER_DIAMOND_ROWS - Math.abs(r);
+    for (let c = -span; c <= span; c++) {
+      pts.push({
+        x: c * SHOWER_CLUSTER_SPACING,
+        y: r * (SHOWER_CLUSTER_SPACING * 0.85),
+        delay: Math.abs(r) * SHOWER_COIN_STAGGER_MS,
+      });
+    }
+  }
+  return pts;
+}
+
+// Fullscreen coin shower: many diamond-shaped coin clusters scattered
+// randomly across the screen, avoiding the reward label, then flying to the
+// coin box (or fading if no box target given).
+function spawnCoinShower(
+  layer: PIXI.Container,
+  originX: number,
+  originY: number,
+  screenWidth: number,
+  screenHeight: number,
+  getAtlasTexture: (atlasUrl: string, frame: string) => PIXI.Texture,
+  clusterCount: number,
+  boxTarget?: { x: number; y: number },
+  onShowerComplete?: () => void,
+): void {
+  const coinTextures = COIN_FRAMES.map((f) =>
+    getAtlasTexture(COIN_ATLAS_URL, f),
+  ).filter((t) => t !== PIXI.Texture.WHITE);
+
+  if (coinTextures.length === 0) {
+    onShowerComplete?.();
+    return;
+  }
+
+  const diamondOffsets = getDiamondClusterOffsets();
+
+  type ShowerCoin = {
+    sprite: PIXI.AnimatedSprite;
+    delay: number;
+    targetScale: number;
+  };
+
+  const coins: ShowerCoin[] = [];
+  const clusterCenters: { x: number; y: number; waveDelay: number }[] = [];
+
+  let attempts = 0;
+  while (clusterCenters.length < clusterCount && attempts < clusterCount * 20) {
+    attempts++;
+    const cx = Math.random() * screenWidth;
+    const cy = Math.random() * screenHeight;
+    const distFromOrigin = Math.hypot(cx - originX, cy - originY);
+    if (distFromOrigin < SHOWER_AVOID_RADIUS) continue;
+
+    const tooClose = clusterCenters.some(
+      (existing) =>
+        Math.hypot(existing.x - cx, existing.y - cy) < SHOWER_CLUSTER_MIN_GAP,
+    );
+    if (tooClose) continue;
+
+    clusterCenters.push({
+      x: cx,
+      y: cy,
+      waveDelay:
+        (distFromOrigin / Math.max(screenWidth, screenHeight)) *
+          SHOWER_CLUSTER_WAVE_MS +
+        Math.random() * 120,
+    });
+  }
+
+  for (const center of clusterCenters) {
+    const clusterScale =
+      SHOWER_SCALE_MIN + 1 * (SHOWER_SCALE_MAX - SHOWER_SCALE_MIN);
+
+    for (const offset of diamondOffsets) {
+      const px = center.x + offset.x;
+      const py = center.y + offset.y;
+
+      const sprite = new PIXI.AnimatedSprite(coinTextures);
+      sprite.anchor.set(0.5);
+      sprite.position.set(px, py);
+      sprite.scale.set(0);
+      sprite.alpha = 0;
+      sprite.zIndex = 9990;
+      sprite.animationSpeed = 0.3 + Math.random() * 0.15;
+      sprite.loop = true;
+      sprite.gotoAndPlay(Math.floor(Math.random() * coinTextures.length));
+      (sprite as any).__isRewardEffect = true;
+      layer.addChild(sprite);
+
+      coins.push({
+        sprite,
+        delay: center.waveDelay + offset.delay,
+        targetScale: clusterScale,
+      });
+    }
+  }
+
+  const explodeTextures = EXPLODE_FRAMES.map((f) =>
+    getAtlasTexture(COIN_ATLAS_URL, f),
+  ).filter((t) => t !== PIXI.Texture.WHITE);
+
+  type ClusterBurst = {
+    sprite: PIXI.AnimatedSprite;
+    delay: number;
+    fired: boolean;
+  };
+  const clusterBursts: ClusterBurst[] = [];
+
+  if (explodeTextures.length > 0) {
+    for (const center of clusterCenters) {
+      const burst = new PIXI.AnimatedSprite(explodeTextures);
+      burst.anchor.set(0.5);
+      burst.position.set(center.x, center.y);
+      burst.scale.set(1.6);
+      burst.animationSpeed = 0.5;
+      burst.loop = false;
+      burst.alpha = 0;
+      burst.zIndex = 9989; // just under the coins (9990)
+      (burst as any).__isRewardEffect = true;
+      layer.addChild(burst);
+      clusterBursts.push({
+        sprite: burst,
+        delay: center.waveDelay,
+        fired: false,
+      });
+    }
+  }
+
+  const maxHoldStart = Math.max(
+    ...coins.map((c) => c.delay + SHOWER_POP_MS),
+    0,
+  );
+  const flyStartMs = maxHoldStart + SHOWER_HOLD_MS;
+
+  let elapsed = 0;
+  let flyTriggered = false;
+
+  const onTick = () => {
+    elapsed += PIXI.Ticker.shared.elapsedMS;
+    clusterBursts.forEach((cb) => {
+      if (cb.fired || cb.sprite.destroyed) return;
+      if (elapsed < cb.delay) return;
+      cb.fired = true;
+      cb.sprite.alpha = 1;
+      cb.sprite.gotoAndPlay(0);
+      cb.sprite.onComplete = () => {
+        if (!cb.sprite.destroyed) {
+          cb.sprite.parent?.removeChild(cb.sprite);
+          cb.sprite.destroy();
+        }
+      };
+    });
+
+    coins.forEach((c) => {
+      if (c.sprite.destroyed) return;
+      const localT = elapsed - c.delay;
+      if (localT < 0) return;
+
+      const popT = Math.min(localT / SHOWER_POP_MS, 1);
+      if (popT < 1) {
+        c.sprite.scale.set(easeOutBack(popT) * c.targetScale);
+        c.sprite.alpha = Math.min(1, popT * 1.5);
+        return;
+      }
+
+      c.sprite.scale.set(c.targetScale);
+      c.sprite.alpha = 1;
+    });
+
+    if (!flyTriggered && elapsed >= flyStartMs) {
+      flyTriggered = true;
+      PIXI.Ticker.shared.remove(onTick);
+
+      const liveSprites = coins
+        .map((c) => c.sprite)
+        .filter((s) => !s.destroyed);
+
+      if (boxTarget && liveSprites.length > 0) {
+        flyShowerCoinsToBox(liveSprites, boxTarget, () => onShowerComplete?.());
+      } else {
+        fadeOutSprites(liveSprites, () => onShowerComplete?.());
+      }
+    }
+  };
+
+  PIXI.Ticker.shared.add(onTick);
+}
+
+function flyShowerCoinsToBox(
+  coins: PIXI.AnimatedSprite[],
+  target: { x: number; y: number },
+  onComplete?: () => void,
+): void {
+  let completed = 0;
+
+  coins.forEach((coin, i) => {
+    const delay = i * SHOWER_FLY_STAGGER_MS;
+    const startX = coin.x;
+    const startY = coin.y;
+    const midX = (startX + target.x) / 2 + (Math.random() - 0.5) * 150;
+    const midY = Math.min(startY, target.y) - 100 - Math.random() * 80;
+    let elapsed = 0;
+    const startScale = coin.scale.x;
+    let stopped = false;
+
+    const onFly = () => {
+      if (coin.destroyed) {
+        PIXI.Ticker.shared.remove(onFly);
+        if (++completed === coins.length) onComplete?.();
+        return;
+      }
+
+      elapsed += PIXI.Ticker.shared.elapsedMS;
+      if (elapsed < delay) return;
+
+      if (!stopped) {
+        coin.stop();
+        stopped = true;
+      }
+
+      const t = Math.min((elapsed - delay) / SHOWER_FLY_DURATION_MS, 1);
+      const et = easeInOut(t);
+      const inv = 1 - et;
+
+      coin.x = inv * inv * startX + 2 * inv * et * midX + et * et * target.x;
+      coin.y = inv * inv * startY + 2 * inv * et * midY + et * et * target.y;
+
+      if (t > 0.8) {
+        const endT = (t - 0.8) / 0.2;
+        coin.scale.set(startScale * (1 - endT * 0.75));
+        coin.alpha = 1 - endT;
+      }
+
+      if (t >= 1) {
+        PIXI.Ticker.shared.remove(onFly);
+        coin.stop();
+        coin.parent?.removeChild(coin);
+        coin.destroy();
+        if (++completed === coins.length) onComplete?.();
+      }
+    };
+
+    PIXI.Ticker.shared.add(onFly);
+  });
+}
+
+// Public types
 export type BigRewardEffectOptions = {
   layer: PIXI.Container;
   x: number;
@@ -76,16 +438,32 @@ export type BigRewardEffectOptions = {
   amount: number;
   boxTarget?: { x: number; y: number };
   onComplete?: () => void;
+  shakeTarget?: PIXI.Container; // e.g. sceneRoot/app.stage — do NOT pass fishLayer
+  screenWidth?: number;
+  screenHeight?: number;
+  enableShake?: boolean;
+  enableCoinShower?: boolean;
 };
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// Main
 export function showBigRewardEffect(options: BigRewardEffectOptions): void {
-  const { layer, x, y, amount, boxTarget, onComplete } = options;
+  const {
+    layer,
+    x,
+    y,
+    amount,
+    boxTarget,
+    onComplete,
+    shakeTarget,
+    screenWidth = 1280,
+    screenHeight = 720,
+    enableShake = true,
+    enableCoinShower = true,
+  } = options;
 
   const { getEffectTexture, getAtlasTexture, getLocalizedTexture } =
     useFishAssetPreload();
 
-  // ── Validate required assets ──────────────────────────────────────────────
   const bigCoinTex = getEffectTexture(BIG_COIN_EFFECT_FRAME);
   if (!bigCoinTex || bigCoinTex === PIXI.Texture.WHITE) {
     console.warn("[bigReward] s_coin0001.png not loaded from effect atlas");
@@ -101,7 +479,30 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
     return;
   }
 
-  // ── Root container ────────────────────────────────────────────────────────
+  const showerTier = getShowerTier(amount);
+
+  // Trigger shake + fullscreen shower right away
+  if (enableShake && shakeTarget) {
+    triggerScreenShake(
+      shakeTarget,
+      showerTier.shakeDurationMs,
+      showerTier.shakeMagnitudePx,
+    );
+  }
+  if (enableCoinShower) {
+    spawnCoinShower(
+      layer,
+      x,
+      y,
+      screenWidth,
+      screenHeight,
+      getAtlasTexture,
+      showerTier.clusterCount,
+      boxTarget,
+    );
+  }
+
+  // Root container
   const root = new PIXI.Container();
   root.position.set(x, y);
   (root as any).__isRewardEffect = true;
@@ -109,7 +510,7 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
   root.sortableChildren = true;
   layer.addChild(root);
 
-  // ── Explosion bursts (z: 2) ───────────────────────────────────────────────
+  // Explosion bursts (z: 2)
   const burstDelays = Array.from({ length: EXPLODE_COUNT }, (_, i) => i * 40);
   const burstFired = new Array<boolean>(EXPLODE_COUNT).fill(false);
 
@@ -128,7 +529,7 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
     return burst;
   });
 
-  // ── Scattered small coins (z: 3) ──────────────────────────────────────────
+  // Scattered small coins (z: 3)
   const smallCoinTex = getAtlasTexture(COIN_ATLAS_URL, SMALL_COIN_FRAME);
   const SCATTER_COUNT = 12;
 
@@ -148,13 +549,25 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
         })
       : [];
 
-  // ── Five circle coins (z: 9) ──────────────────────────────────────────────
+  // Reward visual group: coin ring + label, scaled together as one unit
+  // REWARD_VISUAL_SCALE is applied to this single container, so the coin
+  // ring (size + orbit radius) and the win/amount label always resize in
+  // proportion — no separate constants to keep in sync.
+  const rewardVisual = new PIXI.Container();
+  rewardVisual.sortableChildren = true;
+  root.addChild(rewardVisual);
+
+  // Circle coin group (z: 9 within rewardVisual)
   const bigCoinFrameTextures = BIG_COIN_FRAMES.map((f) =>
     getAtlasTexture(COIN_ATLAS_URL, f),
   ).filter((t) => t !== PIXI.Texture.WHITE);
 
   const coinTextures =
     bigCoinFrameTextures.length > 0 ? bigCoinFrameTextures : [bigCoinTex];
+
+  const circleGroup = new PIXI.Container();
+  circleGroup.zIndex = 9;
+  rewardVisual.addChild(circleGroup);
 
   const circleCoins = Array.from({ length: COIN_COUNT }, (_, i) => {
     const angle = (i / COIN_COUNT) * Math.PI * 2 - Math.PI / 2;
@@ -165,36 +578,33 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
       Math.cos(angle) * CIRCLE_RADIUS,
       Math.sin(angle) * CIRCLE_RADIUS,
     );
-    coin.zIndex = 9;
     coin.animationSpeed = 0.25;
     coin.loop = true;
-    coin.gotoAndStop(0); // start frozen on frame 0
-    root.addChild(coin);
+    coin.gotoAndStop(0);
+    circleGroup.addChild(coin);
     return coin;
   });
 
-  // ── Shared sync state for circle coins ───────────────────────────────────
-  // All coins pop in staggered, but animate and stop together as one unit.
-  // "syncStarted" = last coin finished popping → all start playing frame 0.
-  // "sharedRounds" counts loops on one leader coin; when it hits COIN_ROUNDS
-  // every coin freezes on frame 0 simultaneously.
+  // Shared sync state for circle coins (unchanged behavior)
   let syncStarted = false;
   let sharedRounds = 0;
   let allCoinsDone = false;
 
-  // ── Win sprite (z: 20) ────────────────────────────────────────────────────
+  // Reward label group (z: 20 within rewardVisual) — win sprite + amount
+  const rewardLabelGroup = new PIXI.Container();
+  rewardLabelGroup.zIndex = 20;
+  rewardLabelGroup.alpha = 0;
+  rewardVisual.addChild(rewardLabelGroup);
+
   const winTex = getLocalizedTexture("km", "win.png");
   let winSprite: PIXI.Sprite | null = null;
   if (winTex !== PIXI.Texture.WHITE) {
     winSprite = new PIXI.Sprite(winTex);
     winSprite.anchor.set(0.5);
-    winSprite.scale.set(0);
     winSprite.position.y = -40;
-    winSprite.zIndex = 20;
-    root.addChild(winSprite);
+    rewardLabelGroup.addChild(winSprite);
   }
 
-  // ── Amount label (z: 21) ──────────────────────────────────────────────────
   const amountLabel = new PIXI.BitmapText(`${amount.toLocaleString()}`, {
     fontName: ODD_FONT_NAME,
     fontSize: 18,
@@ -202,29 +612,21 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
   });
   amountLabel.anchor.set(0.5);
   amountLabel.position.set(0, -15);
-  amountLabel.scale.set(0);
-  amountLabel.alpha = 0;
-  amountLabel.zIndex = 21;
-  root.addChild(amountLabel);
+  rewardLabelGroup.addChild(amountLabel);
 
-  // ── Animation state ───────────────────────────────────────────────────────
+  // Animation timing
   const circleDelays = circleCoins.map((_, i) => 80 + i * 60);
   const circleEls = new Array<number>(COIN_COUNT).fill(0);
 
-  // When the last coin finishes popping → sync-play starts
   const LAST_POP_DONE_MS = (circleDelays[COIN_COUNT - 1] ?? 0) + POP_MS;
-
-  // Duration of one full animation cycle in ms (animationSpeed = frames/tick at 60fps)
   const MS_PER_ROUND = (coinTextures.length / 0.25) * (1000 / 60);
   const COINS_ANIM_TOTAL_MS = LAST_POP_DONE_MS + COIN_ROUNDS * MS_PER_ROUND;
-
-  // Hold phase starts after all 3 rounds complete, plus a short buffer
   const holdMs = COINS_ANIM_TOTAL_MS + 200;
 
   let elapsed = 0;
   let flyStarted = false;
 
-  // ── Main tick ─────────────────────────────────────────────────────────────
+  // Main tick
   const onTick = () => {
     if (root.destroyed) {
       PIXI.Ticker.shared.remove(onTick);
@@ -233,6 +635,13 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
 
     const dt = PIXI.Ticker.shared.elapsedMS;
     elapsed += dt;
+
+    // Master scale for the whole reward visual — apply once, every tick is
+    // fine since it's a static value, but kept here so it's trivial to
+    // animate later (e.g. ease it in) if desired.
+    if (!rewardVisual.destroyed) {
+      rewardVisual.scale.set(REWARD_VISUAL_SCALE);
+    }
 
     // Explosion bursts — staggered fire + re-trigger while in hold
     explodeBursts.forEach((burst, i) => {
@@ -248,7 +657,6 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
         burst.alpha = 0;
         if (elapsed >= holdMs * 0.75) return;
 
-        // Re-position and re-fire after a short wait
         const newAngle = Math.random() * Math.PI * 2;
         const newDist = 40 + Math.random() * 90;
         burst.position.set(
@@ -277,14 +685,14 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
       };
     });
 
-    // Circle coins — staggered pop-in, then sync play + sync stop
+    // Circle coins — staggered pop-in (per-coin roundness scale; master
+    // ring scale is applied separately above via rewardVisual)
     circleCoins.forEach((coin, i) => {
       if (coin.destroyed) return;
       circleEls[i]! += dt;
       const localT = circleEls[i]! - circleDelays[i]!;
       if (localT < 0) return;
 
-      // Pop-in phase: scale up frozen on frame 0
       const popT = Math.min(localT / POP_MS, 1);
       if (popT < 1) {
         coin.scale.set(easeOutBack(popT) * COIN_BASE_SCALE);
@@ -298,29 +706,15 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
     if (!syncStarted && elapsed >= LAST_POP_DONE_MS) {
       syncStarted = true;
 
-      // All coins loop freely — only the leader counts rounds.
-      // When the leader finishes its Nth loop it freezes everyone on frame 0
-      // in one shot. Non-leaders never have loop=false set externally so they
-      // animate naturally right up until that single gotoAndStop(0) call.
       const leader = circleCoins[0];
       if (leader && !leader.destroyed) {
         leader.loop = true;
         leader.onLoop = () => {
-          // onLoop fires at the START of each new loop (i.e. the previous loop
-          // just completed), so sharedRounds counts completed loops correctly.
           sharedRounds++;
           if (sharedRounds >= COIN_ROUNDS) {
-            // The Nth loop just completed — stop here, don't start another.
             leader.onLoop = undefined;
             leader.loop = false;
-            // onComplete fires when the sprite reaches its last frame after
-            // loop=false. Since we set loop=false right at the loop boundary
-            // (frame 0), PIXI will not advance further; call gotoAndStop
-            // immediately instead to avoid a one-frame delay.
             allCoinsDone = true;
-            // stop() halts the internal ticker; gotoAndStop(0) sets the frame.
-            // Both are needed: stop() alone doesn't rewind, gotoAndStop alone
-            // on a playing sprite can be overridden on the next ticker update.
             circleCoins.forEach((c) => {
               if (!c.destroyed) {
                 c.stop();
@@ -331,58 +725,59 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
         };
       }
 
-      // Non-leaders just loop freely — no onLoop/onComplete wired
       circleCoins.slice(1).forEach((c) => {
-        if (!c.destroyed) {
-          c.loop = true;
-        }
+        if (!c.destroyed) c.loop = true;
       });
 
-      // Start every coin from frame 0 at the same tick
       circleCoins.forEach((coin) => {
         if (!coin.destroyed) coin.gotoAndPlay(0);
       });
     }
 
-    // Win sprite pop
-    if (winSprite && !winSprite.destroyed) {
-      const wt = Math.min(elapsed / 320, 1);
-      winSprite.scale.set(easeOutBack(wt) * 0.9);
-      winSprite.alpha = Math.min(1, wt * 2);
-    }
-
-    // Amount label pop
-    if (!amountLabel.destroyed) {
-      const at = Math.min((elapsed - 200) / 350, 1);
-      if (at > 0) {
-        amountLabel.scale.set(easeOutBack(at) * 0.9);
-        amountLabel.alpha = Math.min(1, at * 2);
+    // Reward label pop — intro curve; master scale multiplies in via parent
+    if (!rewardLabelGroup.destroyed) {
+      const t = Math.min((elapsed - 200) / 350, 1);
+      if (t > 0) {
+        rewardLabelGroup.scale.set(easeOutBack(t));
+        rewardLabelGroup.alpha = Math.min(1, t * 2);
       }
     }
 
-    // Hold → fade win + label → detach coins → fly/fade
+    // Hold → fade label → detach coins → fly/fade
     if (elapsed > holdMs && !flyStarted) {
       const fadeT = Math.min((elapsed - holdMs) / 350, 1);
 
-      if (winSprite && !winSprite.destroyed)
-        winSprite.alpha = Math.max(0, 1 - fadeT);
-      if (!amountLabel.destroyed) amountLabel.alpha = Math.max(0, 1 - fadeT);
+      if (!rewardLabelGroup.destroyed) {
+        rewardLabelGroup.alpha = Math.max(0, 1 - fadeT);
+      }
 
       if (fadeT >= 1) {
         flyStarted = true;
         PIXI.Ticker.shared.remove(onTick);
 
-        // Detach coins into layer space before destroying root
+        // Detach coins into layer space before destroying root. Coins are
+        // nested root → rewardVisual → circleGroup → coin, so removeChild
+        // must target circleGroup (their actual parent), while toGlobal
+        // still resolves correctly across the full chain regardless of depth.
         const flyCoins: PIXI.AnimatedSprite[] = [];
         for (const coin of circleCoins) {
           if (coin.destroyed) continue;
+
           const worldPos = root.toGlobal(coin.position);
           const layerPos = layer.toLocal(worldPos);
-          root.removeChild(coin);
+
+          // Capture the coin's fully-resolved world scale (COIN_BASE_SCALE *
+          // rewardVisual's scale, and any other ancestor scale) BEFORE re-parenting,
+          // since re-parenting drops the parent multiplier and the coin's own
+          // .scale alone doesn't reflect what was actually rendered on screen.
+          const flyScale = COIN_BASE_SCALE * REWARD_VISUAL_SCALE;
+
+          circleGroup.removeChild(coin);
           coin.position.set(layerPos.x, layerPos.y);
+          coin.scale.set(flyScale);
           coin.zIndex = 9999;
           coin.stop();
-          coin.gotoAndStop(0); // ensure frozen on frame 0 for the fly
+          coin.gotoAndStop(0);
           layer.addChild(coin);
           flyCoins.push(coin);
         }
@@ -402,7 +797,7 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
   PIXI.Ticker.shared.add(onTick);
 }
 
-// ── Fly circle coins to coin box ──────────────────────────────────────────────
+// Fly circle coins to coin box
 function flyCoinsToBox(
   coins: PIXI.AnimatedSprite[],
   layer: PIXI.Container,
@@ -417,6 +812,7 @@ function flyCoinsToBox(
     const delay = i * STAGGER_DELAY;
     const startX = coin.x;
     const startY = coin.y;
+    const startScale = coin.scale.x;
     const midX = (startX + target.x) / 2 + (Math.random() - 0.5) * 120;
     const midY = Math.min(startY, target.y) - 80 - Math.random() * 60;
     let elapsed = 0;
@@ -435,18 +831,18 @@ function flyCoinsToBox(
       const et = easeInOut(t);
       const inv = 1 - et;
 
-      // Quadratic bezier arc
       coin.x = inv * inv * startX + 2 * inv * et * midX + et * et * target.x;
       coin.y = inv * inv * startY + 2 * inv * et * midY + et * et * target.y;
 
       if (t > 0.78) {
         const endT = (t - 0.78) / 0.22;
-        coin.scale.set(0.5 * (1 - endT * 0.8));
+        coin.scale.set(startScale * (1 - endT * 0.8));
         coin.alpha = 1 - endT;
-      } else {
-        coin.scale.set(0.5 * (0.5 + t * 0.5));
-        coin.alpha = 1;
       }
+      // else {
+      //   coin.scale.set(startScale * (0.5 + t * 0.5));
+      //   coin.alpha = 1;
+      // }
 
       if (t >= 1) {
         PIXI.Ticker.shared.remove(onFly);
@@ -460,7 +856,7 @@ function flyCoinsToBox(
   });
 }
 
-// ── Fallback: fade out sprites ────────────────────────────────────────────────
+// Fallback: fade out sprites
 function fadeOutSprites(
   sprites: PIXI.DisplayObject[],
   onComplete?: () => void,

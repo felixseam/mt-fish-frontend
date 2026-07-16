@@ -307,9 +307,11 @@ function fireLarge() {
         y: spawnY.value,
         amount: amount.value,
         boxTarget: boxTarget(),
+        shakeTarget: app.stage,
+        screenWidth: app.screen.width,
+        screenHeight: app.screen.height,
     });
 }
-
 function fireMiss() {
     lastFired.value = "miss";
     showFishMissRewardEffect({

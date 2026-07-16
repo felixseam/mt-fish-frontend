@@ -911,6 +911,7 @@ export function useFishGameplayScene() {
       },
       getCoinBoxPosition: () => coinBoxWorldPosition,
       getRewardLayer: () => fishLayer,
+      getShakeTarget: () => sceneRoot,
     });
     uiLayer.addChild(cannonBetUi.container);
     layoutCannonUi();

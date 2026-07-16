@@ -99,6 +99,7 @@ export async function createCannonBetUi(options?: {
   resolveCannonTypeId?: (betAmount: number) => number | null;
   getCoinBoxPosition?: () => { x: number; y: number } | undefined;
   getRewardLayer?: () => PIXI.Container | null;
+  getShakeTarget?: () => PIXI.Container | null;
 }) {
   const { preloadAppAssets, getAtlasTexture } = useFishAssetPreload();
   const gameAudio = useGameAudio();
@@ -628,6 +629,9 @@ export async function createCannonBetUi(options?: {
                   y: rewardPos.y,
                   amount: result.jackpotReward || 0,
                   boxTarget: options?.getCoinBoxPosition?.(),
+                  shakeTarget: options?.getShakeTarget?.() ?? undefined,
+                  screenWidth: GAME_WIDTH,
+                  screenHeight: GAME_HEIGHT,
                 });
               }
               // playFishKillAnimation()
