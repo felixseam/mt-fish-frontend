@@ -1382,13 +1382,35 @@ export function createFishContextMachine(options: {
     tagged.__isDying = true;
     tagged.__isDeadFish = true;
 
-    if (liveIndex >= 0) liveFish.splice(liveIndex, 1);
+    if (liveIndex >= 0) {
+      liveFish.splice(liveIndex, 1);
+    }
 
     const obj = display as PIXI.Container;
 
-    // Stop swimming animation if it's an AnimatedSprite
-    const anim = (obj as any).__anim as PIXI.AnimatedSprite | undefined;
-    if (anim && !anim.destroyed) anim.stop();
+    // ── Anim type guards (AnimatedSprite vs Spine) ───────────────────────
+    const isAnimatedSprite = (o: any): o is PIXI.AnimatedSprite =>
+      !!o &&
+      typeof o.stop === "function" &&
+      typeof o.play === "function" &&
+      "animationSpeed" in o;
+
+    const isSpineDisplay = (o: any): boolean =>
+      !!o && !!o.state && typeof o.state.setAnimation === "function";
+
+    const anim = (obj as any).__anim as
+      | PIXI.AnimatedSprite
+      | (PIXI.DisplayObject & { state?: any; autoUpdate?: boolean })
+      | undefined;
+
+    // Stop swimming animation, regardless of underlying type
+    if (anim && !(anim as any).destroyed) {
+      if (isAnimatedSprite(anim)) {
+        anim.stop();
+      } else if (isSpineDisplay(anim)) {
+        (anim as any).autoUpdate = false;
+      }
+    }
 
     const startX = obj.x;
     const startY = obj.y;
@@ -1400,6 +1422,7 @@ export function createFishContextMachine(options: {
     const PANIC_MS = 260;
     const FADE_MS = 240;
     const TOTAL_MS = SHOCK_MS + DROP_MS + PANIC_MS + FADE_MS;
+
     const SHOCK_LIFT = 18;
     const BOUNCE_DEPTH = 6;
 
@@ -1435,7 +1458,7 @@ export function createFishContextMachine(options: {
 
       elapsed += PIXI.Ticker.shared.elapsedMS;
 
-      // Phase 1 — shock
+      // Phase 1 — shock: shake sideways + lift up
       if (elapsed <= SHOCK_MS) {
         const t = Math.min(elapsed / SHOCK_MS, 1);
         obj.x = startX + Math.sin(t * Math.PI * 5) * 5 * (1 - t * 0.35);
@@ -1445,7 +1468,7 @@ export function createFishContextMachine(options: {
         return;
       }
 
-      // Phase 2 — drop
+      // Phase 2 — drop: fall back down with a small bounce
       if (elapsed <= SHOCK_MS + DROP_MS) {
         const t = Math.min((elapsed - SHOCK_MS) / DROP_MS, 1);
         obj.x = startX + Math.sin(t * Math.PI * 6) * 1.5 * (1 - t);
@@ -1462,21 +1485,28 @@ export function createFishContextMachine(options: {
         return;
       }
 
-      // Phase 3 & 4 — panic wiggle + fade
+      // Phase 3 & 4 — panic wiggle, then fade out
       const panicElapsed = elapsed - SHOCK_MS - DROP_MS;
       const wave = panicElapsed * 0.07;
       obj.x = startX + Math.sin(wave * 2.6) * 4;
       obj.y = startY + Math.sin(wave) * 2;
       obj.rotation = startRot + Math.sin(wave * 1.8) * 0.05;
 
-      // Speed up the swim cycle during panic
-      const animSprite = (obj as any).__anim as PIXI.AnimatedSprite | undefined;
-      if (animSprite && !animSprite.destroyed) {
-        animSprite.animationSpeed = Math.max(
+      // Speed up the swim cycle during panic (type-safe per anim kind)
+      if (anim && !(anim as any).destroyed) {
+        const targetSpeed = Math.max(
           2.4,
           ((obj as any).__walkAnimSpeed ?? 1) * 2.8,
         );
-        if (!animSprite.playing) animSprite.play();
+
+        if (isAnimatedSprite(anim)) {
+          anim.animationSpeed = targetSpeed;
+          if (!anim.playing) anim.play();
+        } else if (isSpineDisplay(anim)) {
+          (anim as any).state.timeScale = targetSpeed;
+          // ensure spine keeps ticking through the panic phase
+          (anim as any).autoUpdate = true;
+        }
       }
 
       if (panicElapsed > PANIC_MS) {
