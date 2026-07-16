@@ -922,7 +922,7 @@ export function createFishContextMachine(options: {
         isExiting: Boolean(saved.is_exiting),
         exitTarget:
           Number.isFinite(saved.exit_target_x) &&
-            Number.isFinite(saved.exit_target_y)
+          Number.isFinite(saved.exit_target_y)
             ? new PIXI.Point(saved.exit_target_x!, saved.exit_target_y!)
             : undefined,
         exitSpeed:
@@ -1307,7 +1307,10 @@ export function createFishContextMachine(options: {
     currentNormalSceneId = NORMAL_SCENES.includes(startScene as any)
       ? startScene
       : "bg1";
-    switchScene(startScene, "normal");
+    switchScene(
+      startScene,
+      initialRuntimeState?.boss_scene_active ? "boss" : "normal",
+    );
 
     const startIndex =
       typeof restoredContextIndex === "number" && restoredContextIndex >= 0
@@ -1332,6 +1335,23 @@ export function createFishContextMachine(options: {
       spawnCursor = restoredSpawnCursor;
     }
     restoreLiveFishFromState(initialRuntimeState?.live_fish);
+
+    // ── Re-sync boss tracking, which enterContext() just zeroed out ──
+    const restoredBossFish = liveFish.filter((fish) => fish.isBoss);
+    if (restoredBossFish.length > 0) {
+      bossActiveCount = restoredBossFish.length;
+      bossSceneLock =
+        initialRuntimeState?.boss_scene_lock_id &&
+        initialRuntimeState.boss_scene_lock_id.length > 0
+          ? initialRuntimeState.boss_scene_lock_id
+          : (BOSS_SCENE_BY_FISH_ID[restoredBossFish[0]!.fishId] ?? null);
+    } else if (
+      initialRuntimeState?.boss_scene_active &&
+      initialRuntimeState?.boss_scene_lock_id
+    ) {
+      bossSceneLock = initialRuntimeState.boss_scene_lock_id;
+    }
+
     app.ticker.add(tick);
   }
 
@@ -1368,9 +1388,29 @@ export function createFishContextMachine(options: {
 
     const obj = display as PIXI.Container;
 
-    // Stop swimming animation if it's an AnimatedSprite
-    const anim = (obj as any).__anim as PIXI.AnimatedSprite | undefined;
-    if (anim && !anim.destroyed) anim.stop();
+    // ── Anim type guards (AnimatedSprite vs Spine) ───────────────────────
+    const isAnimatedSprite = (o: any): o is PIXI.AnimatedSprite =>
+      !!o &&
+      typeof o.stop === "function" &&
+      typeof o.play === "function" &&
+      "animationSpeed" in o;
+
+    const isSpineDisplay = (o: any): boolean =>
+      !!o && !!o.state && typeof o.state.setAnimation === "function";
+
+    const anim = (obj as any).__anim as
+      | PIXI.AnimatedSprite
+      | (PIXI.DisplayObject & { state?: any; autoUpdate?: boolean })
+      | undefined;
+
+    // Stop swimming animation, regardless of underlying type
+    if (anim && !(anim as any).destroyed) {
+      if (isAnimatedSprite(anim)) {
+        anim.stop();
+      } else if (isSpineDisplay(anim)) {
+        (anim as any).autoUpdate = false;
+      }
+    }
 
     const startX = obj.x;
     const startY = obj.y;
@@ -1387,11 +1427,27 @@ export function createFishContextMachine(options: {
     const BOUNCE_DEPTH = 6;
 
     const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
-    const easeInOut = (t: number) => t < 0.5
-      ? 4 * t * t * t
-      : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    const easeInOut = (t: number) =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
     let elapsed = 0;
+
+    const cleanup = () => {
+      // Fully halt spine before destroy, to avoid ticker updating a
+      // half-destroyed skeleton on the next frame.
+      if (anim && isSpineDisplay(anim)) {
+        try {
+          (anim as any).state.clearTracks();
+        } catch {
+          // no-op — already torn down
+        }
+        (anim as any).autoUpdate = false;
+      }
+
+      if (!obj.destroyed) fishLayer.removeChild(obj);
+      live?.destroy();
+      if (live?.isBoss) releaseBossSlot();
+    };
 
     const onKill = () => {
       if (obj.destroyed) {
@@ -1417,7 +1473,10 @@ export function createFishContextMachine(options: {
         const t = Math.min((elapsed - SHOCK_MS) / DROP_MS, 1);
         obj.x = startX + Math.sin(t * Math.PI * 6) * 1.5 * (1 - t);
         if (t < 0.78) {
-          obj.y = startY - SHOCK_LIFT + (SHOCK_LIFT + BOUNCE_DEPTH) * easeInOut(t / 0.78);
+          obj.y =
+            startY -
+            SHOCK_LIFT +
+            (SHOCK_LIFT + BOUNCE_DEPTH) * easeInOut(t / 0.78);
         } else {
           obj.y = startY + BOUNCE_DEPTH * (1 - easeOut((t - 0.78) / 0.22));
         }
@@ -1433,14 +1492,21 @@ export function createFishContextMachine(options: {
       obj.y = startY + Math.sin(wave) * 2;
       obj.rotation = startRot + Math.sin(wave * 1.8) * 0.05;
 
-      // Speed up the swim cycle during panic
-      const animSprite = (obj as any).__anim as PIXI.AnimatedSprite | undefined;
-      if (animSprite && !animSprite.destroyed) {
-        animSprite.animationSpeed = Math.max(
+      // Speed up the swim cycle during panic (type-safe per anim kind)
+      if (anim && !(anim as any).destroyed) {
+        const targetSpeed = Math.max(
           2.4,
           ((obj as any).__walkAnimSpeed ?? 1) * 2.8,
         );
-        if (!animSprite.playing) animSprite.play();
+
+        if (isAnimatedSprite(anim)) {
+          anim.animationSpeed = targetSpeed;
+          if (!anim.playing) anim.play();
+        } else if (isSpineDisplay(anim)) {
+          (anim as any).state.timeScale = targetSpeed;
+          // ensure spine keeps ticking through the panic phase
+          (anim as any).autoUpdate = true;
+        }
       }
 
       if (panicElapsed > PANIC_MS) {
@@ -1454,12 +1520,6 @@ export function createFishContextMachine(options: {
 
       PIXI.Ticker.shared.remove(onKill);
       cleanup();
-    };
-
-    const cleanup = () => {
-      if (!obj.destroyed) fishLayer.removeChild(obj);
-      live?.destroy();
-      if (live?.isBoss) releaseBossSlot();
     };
 
     PIXI.Ticker.shared.add(onKill);

@@ -113,6 +113,7 @@ function playExplosion(
   explosion.zIndex = 9998;
   layer.sortableChildren = true;
   layer.addChild(explosion);
+  (explosion as any).__isRewardEffect = true;
 
   const peakFrame = Math.floor(textures.length * 0.45);
   let peaked = false;
@@ -152,6 +153,7 @@ function playCoinFly(
   coin.position.set(fromX, fromY);
   coin.zIndex = 9999;
   layer.addChild(coin);
+  (coin as any).__isRewardEffect = true;
 
   const FLY_MS = 600;
   let elapsed = 0;
@@ -201,6 +203,7 @@ function playShine(
   shine.scale.set(0);
   shine.zIndex = 9998;
   layer.addChild(shine);
+  (shine as any).__isRewardEffect = true;
 
   const SHINE_MS = 350;
   let elapsed = 0;
@@ -534,7 +537,7 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
 
     if (exitStarted) {
       const exitT = Math.min((elapsed - holdMs) / EXIT_MS, 1);
-      root.scale.set(Math.max(0, 1 - easeInBack(exitT))* REWARD_PANEL_SCALE);
+      root.scale.set(Math.max(0, 1 - easeInBack(exitT)) * REWARD_PANEL_SCALE);
 
       if (exitT >= 1) {
         PIXI.Ticker.shared.remove(onTick);

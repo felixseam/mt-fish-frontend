@@ -424,6 +424,7 @@ function animateReward(
         const layerPos = layer.toLocal(worldPos);
         root.removeChild(coin);
         coin.position.set(layerPos.x, layerPos.y);
+        (coin as any).__isRewardEffect = true;
         layer.addChild(coin);
         flyCoins.push(coin);
       }
