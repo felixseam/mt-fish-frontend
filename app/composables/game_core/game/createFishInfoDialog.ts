@@ -491,7 +491,7 @@ export async function createFishInfoDialog() {
   }
 
   function buildSoloCard(entry: FishInfoEntry) {
-    const card = new PIXI.Container();
+    const card = new PIXI.Container(); 
 
     const bg = new PIXI.Graphics();
     bg.lineStyle(3, entry.isBoss ? 0xffd166 : 0x2d99c7, 0.85);

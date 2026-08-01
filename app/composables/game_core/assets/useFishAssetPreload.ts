@@ -115,11 +115,9 @@ export const DEFAULT_AVATAR_URLS = [
   "/avatar/Avatar7.png",
 ] as const;
 
-// ── Icon button ───────────────────────────────────────────────────────────────
 export const ICON_BUTTON_ATLAS_URL = "/icon_button/button.json";
 export const ICON_BUTTON_IMAGE_URL = "/icon_button/button.png";
 
-// ── Internal types ────────────────────────────────────────────────────────────
 type ApiRenderState = {
   prefix: string;
   frame_array: string[];
@@ -154,7 +152,6 @@ type AtlasData = {
 
 type AtlasTextureMap = Map<string, PIXI.Texture>;
 
-// ── Module-level caches ───────────────────────────────────────────────────────
 const loadedUrls = new Set<string>();
 const loadingUrls = new Map<string, Promise<void>>();
 const effectTextures = new Map<string, PIXI.Texture>();

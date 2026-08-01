@@ -10,56 +10,55 @@ export default defineNuxtPlugin((nuxtApp) => {
   const vuetify = createVuetify({
     components,
     directives,
+
     theme: {
-      defaultTheme: "crystalLagoon",
+      defaultTheme: "light",
+
       themes: {
-        crystalLagoon: {
+        light: {
           dark: false,
+
           colors: {
-            primary: "#0097A7",
-            secondary: "#00BCD4",
-            background: "#F0FBFF",
+            primary: "#326690",     
+            secondary: "#848EA0",  
+            background: "#F4F6F8",
             surface: "#FFFFFF",
-            accent: "#FF8F00",
-            success: "#FF8F00",
-            warning: "#E53935",
+
+            accent: "#D6EFFC",      
+            success: "#43A047",
+            warning: "#EEA236",
             error: "#E53935",
-            info: "#0097A7",
-            "on-background": "#1A3A4A",
-            "on-surface": "#1A3A4A",
-            "on-primary": "#E0F7FA",
+            info: "#326690",       
+
+            create: "#75BCE5",      
+            cancel: "#848EA0",      
+
+            navy: "#213448",
+            slate: "#547792",
+            steel: "#94B4C1",
+            beige: "#EAE0CF",
+
+            "on-background": "#26333F",
+            "on-surface": "#26333F",
+
+            "on-primary": "#FFFFFF",
             "on-secondary": "#FFFFFF",
-            "on-accent": "#FFFFFF",
-            "on-success": "#FFFFFF",
+            "on-accent": "#26333F",   
             "on-warning": "#FFFFFF",
             "on-error": "#FFFFFF",
             "on-info": "#FFFFFF",
-            "close-btn": "#E53935",
-          },
-        },
+            "on-create": "#FFFFFF",
+            "on-cancel": "#FFFFFF",
 
-        deepOcean: {
-          dark: true,
-          colors: {
-            primary: "#00C2D4",
-            secondary: "#0B6E8C",
-            background: "#0A1628",
-            surface: "#0E2744",
-            accent: "#FFD54F",
-            success: "#FFD54F",
-            warning: "#FF6B35",
-            error: "#FF6B35",
-            info: "#00C2D4",
-            "on-background": "#E0F7FA",
-            "on-surface": "#E0F7FA",
-            "on-primary": "#0A1628",
-            "on-secondary": "#E0F7FA",
-            "on-accent": "#0A1628",
-            "on-success": "#0A1628",
-            "on-warning": "#0A1628",
-            "on-error": "#0A1628",
-            "on-info": "#0A1628",
-            "close-btn": "#FF5252",
+            "on-navy": "#FFFFFF",
+            "on-slate": "#FFFFFF",
+            "on-steel": "#26333F",
+            "on-beige": "#26333F",
+
+            "on-lose": "#EF4444",
+            "on-win": "#1E9C07",
+
+            "close-btn": "#E53935",
           },
         },
       },

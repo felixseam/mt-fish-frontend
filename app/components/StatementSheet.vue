@@ -20,7 +20,7 @@
           <div class="filter-right">
             <v-btn color="#00C2D4" class="text-capitalize filter-btn" @click="setQuickDate(0)">Today</v-btn>
             <v-btn color="#FFD54F" class="text-capitalize filter-btn" @click="setQuickDate(1)">Yesterday</v-btn>
-            <v-btn color="#FF6B35" class="text-capitalize filter-btn" @click="setQuickDate(7)">7 Days Ago</v-btn>
+            <v-btn color="#FF6B35" class="text-capitalize filter-btn" @click="setQuickDate(7)">Week</v-btn>
           </div>
         </div>
 
@@ -128,7 +128,7 @@ import { getStatements, type StatementItem } from "~/composables/service/stateme
 const showSheet = ref(false);
 const filterDate = ref(formatDateForInput(new Date()));
 const currentPage = ref(1);
-const itemsPerPage = 10;
+const itemsPerPage = 20;
 const totalItems = ref(0);
 const reportData = ref<StatementItem[]>([]);
 const isLoading = ref(false);
@@ -344,7 +344,7 @@ defineExpose({ open });
   background: rgb(var(--v-theme-primary)) !important;
   color: rgb(var(--v-theme-on-primary)) !important;
   font-weight: 700 !important;
-  font-size: 15px !important;
+  font-size: 13px !important;
   text-align: center !important;
   border: 1.5px solid rgb(var(--v-theme-secondary)) !important;
   white-space: nowrap;
@@ -355,7 +355,7 @@ defineExpose({ open });
   color: rgb(var(--v-theme-on-surface)) !important;
   border: 1px solid rgb(var(--v-theme-secondary)) !important;
   text-align: center !important;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .report-table :deep(tbody tr:nth-child(even) td) {
@@ -370,7 +370,7 @@ defineExpose({ open });
 .report-table :deep(tbody tr.summary-row td) {
   background: rgba(var(--v-theme-primary), 0.10) !important;
   font-weight: 700 !important;
-  font-size: 14px !important;
+  font-size: 12px !important;
 }
 
 .report-table :deep(tbody tr.grand-total-row td) {
