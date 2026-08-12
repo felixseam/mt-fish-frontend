@@ -745,7 +745,7 @@ export function useFishGameplayScene() {
   async function mount(
     container: HTMLDivElement,
     options?: {
-      onPause?: () => void;
+      // onPause?: () => void;
       onPauseTooLong?: () => void;
       onAvatarClick?: () => void;
       onMute?: () => void;
@@ -787,7 +787,7 @@ export function useFishGameplayScene() {
           pauseReloadTimer = null;
           options?.onPauseTooLong?.();
         }, PAUSE_RELOAD_THRESHOLD_MS);
-        options?.onPause?.();
+        // options?.onPause?.();
         return;
       }
     }

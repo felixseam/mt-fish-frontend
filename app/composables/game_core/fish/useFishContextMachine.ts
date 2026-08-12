@@ -1060,49 +1060,49 @@ export function createFishContextMachine(options: {
     };
   }
 
-  function setPaused(paused: boolean) {
-    const now = performance.now();
-    if (paused) {
-      if (pausedAtMs != null) return;
-      pausedAtMs = now;
-      return;
-    }
+  // function setPaused(paused: boolean) {
+  //   const now = performance.now();
+  //   if (paused) {
+  //     if (pausedAtMs != null) return;
+  //     pausedAtMs = now;
+  //     return;
+  //   }
 
-    if (pausedAtMs == null) return;
-    const pausedDuration = Math.max(0, now - pausedAtMs);
-    pausedAtMs = null;
+  //   if (pausedAtMs == null) return;
+  //   const pausedDuration = Math.max(0, now - pausedAtMs);
+  //   pausedAtMs = null;
 
-    // Shift all time references forward by pause duration
-    contextStartTime += pausedDuration;
+  //   // Shift all time references forward by pause duration
+  //   contextStartTime += pausedDuration;
 
-    if (pendingContextSwitch) {
-      pendingContextSwitch.activateAtMs += pausedDuration;
-    }
+  //   if (pendingContextSwitch) {
+  //     pendingContextSwitch.activateAtMs += pausedDuration;
+  //   }
 
-    // Clamp contextStartTime so elapsed never overshoots
-    // If the context would have expired during pause, reset it so it runs
-    // from a fresh start rather than immediately triggering scheduleNextContext
-    const resumeElapsed = performance.now() - contextStartTime;
-    if (resumeElapsed >= currentContextDurationMs) {
-      // Context expired while paused — reset start time to now
-      // This means the context gets a full fresh run instead of
-      // immediately scheduling the next one on the first tick
-      contextStartTime = performance.now();
-      spawnCursor = spawnEvents.length; // skip all pending spawns — already stale
-    }
+  //   // Clamp contextStartTime so elapsed never overshoots
+  //   // If the context would have expired during pause, reset it so it runs
+  //   // from a fresh start rather than immediately triggering scheduleNextContext
+  //   const resumeElapsed = performance.now() - contextStartTime;
+  //   if (resumeElapsed >= currentContextDurationMs) {
+  //     // Context expired while paused — reset start time to now
+  //     // This means the context gets a full fresh run instead of
+  //     // immediately scheduling the next one on the first tick
+  //     contextStartTime = performance.now();
+  //     spawnCursor = spawnEvents.length; // skip all pending spawns — already stale
+  //   }
 
-    // Skip any spawn events whose delay passed during pause
-    const spawnElapsedMs = Math.max(
-      0,
-      performance.now() - contextStartTime - leadInMs,
-    );
-    while (
-      spawnCursor < spawnEvents.length &&
-      (spawnEvents[spawnCursor]?.delayMs ?? Infinity) <= spawnElapsedMs
-    ) {
-      spawnCursor += 1;
-    }
-  }
+  //   // Skip any spawn events whose delay passed during pause
+  //   const spawnElapsedMs = Math.max(
+  //     0,
+  //     performance.now() - contextStartTime - leadInMs,
+  //   );
+  //   while (
+  //     spawnCursor < spawnEvents.length &&
+  //     (spawnEvents[spawnCursor]?.delayMs ?? Infinity) <= spawnElapsedMs
+  //   ) {
+  //     spawnCursor += 1;
+  //   }
+  // }
 
   function updateFish(deltaMs: number) {
     liveFish = liveFish.filter((fish) => {
@@ -1529,6 +1529,6 @@ export function createFishContextMachine(options: {
     destroy,
     playKillAnimationForDisplay,
     getRuntimeState: buildRuntimeStateSnapshot,
-    setPaused,
+    // setPaused,
   };
 }

@@ -11,6 +11,7 @@ export const frontendMessages = {
       loading: "Loading...",
       english: "EN",
       khmer: "KM",
+      noData: "Empty Data"
     },
     layout: {
       rotateDevice: "Please rotate your device",
@@ -98,6 +99,7 @@ export const frontendMessages = {
       successMessage: "Welcome back to Aqua Area.",
       failedTitle: "Login failed",
       failedMessage: "Login failed. Please try again.",
+      rememberMe: "Remember Me"
     },
     balance: {
       insufficientTitle: "Your balance is insufficient",
@@ -108,6 +110,7 @@ export const frontendMessages = {
       notEnoughCoinsShort: "Not enough coins",
       youHave: "You have",
       betRequires: "Bet requires",
+      needMoreCoins: "Need {coins} more coins",
       exchangeCoinsNow: "Exchange Coins Now",
       coinBalance: "Coin balance",
       exchangeNow: "Exchange now",
@@ -125,7 +128,7 @@ export const frontendMessages = {
       orCustom: "or custom",
       enterCoinAmount: "Enter coin amount",
       customPlaceholder: "Enter coin amount",
-      minCoins: "Min. 100 coins",
+      minCoins: "Min 100 coins",
       minimumCoins: "Minimum 100 coins",
       insufficientCurrency: "Insufficient {currency} balance",
       availableCoins: "Available coins",
@@ -171,6 +174,8 @@ export const frontendMessages = {
       loading: "កំពុងផ្ទុក...",
       english: "EN",
       khmer: "ខ្មែរ",
+      noData: "គ្មានទិន្នន័យ"
+
     },
     layout: {
       rotateDevice: "សូមបង្វិលឧបករណ៍របស់អ្នក",
@@ -268,6 +273,7 @@ export const frontendMessages = {
       notEnoughCoinsShort: "កាក់មិនគ្រប់គ្រាន់",
       youHave: "អ្នកមាន",
       betRequires: "ភ្នាល់ត្រូវការ",
+      needMoreCoins: "ត្រូវការកាក់បន្ថែម {coins} កាក់",
       exchangeCoinsNow: "ប្តូរកាក់ទៅឥឡូវនេះ",
       coinBalance: "សមតុល្យកាក់",
       exchangeNow: "ប្តូរឥឡូវនេះ",

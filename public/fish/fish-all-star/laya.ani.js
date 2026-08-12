@@ -1672,7 +1672,7 @@
           -1 == this._skinIndex && (this._skinIndex = 0)),
           this._player.on(e.Event.PLAYED, this, this._onPlay),
           this._player.on(e.Event.STOPPED, this, this._onStop),
-          this._player.on(e.Event.PAUSED, this, this._onPause),
+          // this._player.on(e.Event.PAUSED, this, this._onPause),
           e.LayaEnv.isPlaying &&
             this._animationName &&
             this.play(this._animationName, this._loop, !0));
@@ -1699,9 +1699,9 @@
         }
       ((this._drawOrder = null), this.event(e.Event.STOPPED));
     }
-    _onPause() {
-      this.event(e.Event.PAUSED);
-    }
+    // _onPause() {
+    //   this.event(e.Event.PAUSED);
+    // }
     _parseSrcBoneMatrix() {
       let t = this._templet.srcBoneMatrixArr.length;
       for (let i = 0; i < t; i++) this._boneMatrixArray.push(new e.Matrix());

@@ -19,6 +19,10 @@ type MenuUiOptions = {
 
 export async function createMenuUi(options?: MenuUiOptions) {
   const { getJsonAsset, preloadJsonAsset } = useFishAssetPreload();
+  const isTouchLike =
+    typeof window !== "undefined" &&
+    ((window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches ?? false) ||
+      window.innerWidth < 900);
 
   const rootContainer = new PIXI.Container();
   rootContainer.sortableChildren = true;
@@ -143,15 +147,15 @@ export async function createMenuUi(options?: MenuUiOptions) {
   // ─────────────────────────────────────────────────────────────
   // Sizes
   // ─────────────────────────────────────────────────────────────
-  const MENU_BTN_SIZE = 64;
+  const MENU_BTN_SIZE = isTouchLike ? 74 : 64;
 
-  const ICON_SIZE = 56;
+  const ICON_SIZE = isTouchLike ? 64 : 56;
 
-  const ICON_GAP = 12;
+  const ICON_GAP = isTouchLike ? 14 : 12;
 
-  const PADDING_X = 20;
+  const PADDING_X = isTouchLike ? 22 : 20;
 
-  const PADDING_Y = 20;
+  const PADDING_Y = isTouchLike ? 22 : 20;
 
   const panelW = ICON_SIZE + PADDING_X * 2;
 
@@ -194,6 +198,7 @@ export async function createMenuUi(options?: MenuUiOptions) {
   menuBtnContainer.cursor = "pointer";
 
   menuBtnContainer.zIndex = 2;
+  menuBtnContainer.hitArea = new PIXI.Rectangle(0, 0, MENU_BTN_SIZE, MENU_BTN_SIZE);
 
   const menuBtnBg = new PIXI.Graphics();
 
@@ -305,6 +310,7 @@ export async function createMenuUi(options?: MenuUiOptions) {
     btnContainer.eventMode = "static";
 
     btnContainer.cursor = "pointer";
+    btnContainer.hitArea = new PIXI.Rectangle(0, 0, ICON_SIZE, ICON_SIZE);
 
     btnContainer.position.set(
       PADDING_X,
@@ -346,22 +352,23 @@ export async function createMenuUi(options?: MenuUiOptions) {
 
     btnContainer.addChild(iconSprite);
 
-    // hover
-    btnContainer.on("pointerover", () => {
-      gsap.to(btnContainer.scale, {
-        x: 1.1,
-        y: 1.1,
-        duration: 0.12,
+    if (!isTouchLike) {
+      btnContainer.on("pointerover", () => {
+        gsap.to(btnContainer.scale, {
+          x: 1.1,
+          y: 1.1,
+          duration: 0.12,
+        });
       });
-    });
 
-    btnContainer.on("pointerout", () => {
-      gsap.to(btnContainer.scale, {
-        x: 1,
-        y: 1,
-        duration: 0.12,
+      btnContainer.on("pointerout", () => {
+        gsap.to(btnContainer.scale, {
+          x: 1,
+          y: 1,
+          duration: 0.12,
+        });
       });
-    });
+    }
 
     // click
     btnContainer.on("pointerdown", (e) => {
@@ -469,21 +476,23 @@ export async function createMenuUi(options?: MenuUiOptions) {
     isOpen ? closePanel() : openPanel();
   });
 
-  menuBtnContainer.on("pointerover", () => {
-    gsap.to(menuBtnContainer.scale, {
-      x: 1.1,
-      y: 1.1,
-      duration: 0.15,
+  if (!isTouchLike) {
+    menuBtnContainer.on("pointerover", () => {
+      gsap.to(menuBtnContainer.scale, {
+        x: 1.1,
+        y: 1.1,
+        duration: 0.15,
+      });
     });
-  });
 
-  menuBtnContainer.on("pointerout", () => {
-    gsap.to(menuBtnContainer.scale, {
-      x: 1,
-      y: 1,
-      duration: 0.15,
+    menuBtnContainer.on("pointerout", () => {
+      gsap.to(menuBtnContainer.scale, {
+        x: 1,
+        y: 1,
+        duration: 0.15,
+      });
     });
-  });
+  }
 
   // ─────────────────────────────────────────────────────────────
   // Destroy

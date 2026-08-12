@@ -592,7 +592,7 @@ export async function createCannonBetUi(options?: {
               if (result.isReward) {
                 const rewardAmount = result.reward || 0;
                 if (rewardAmount > 0) {
-                  gameAudio.playSoundEffect("coinReward");
+                  gameAudio.playSoundEffect("specialAddCoin");
                   // Random position biased toward center of screen
                   // rewardLayer coords: 0,0 top-left to GAME_WIDTH,GAME_HEIGHT bottom-right
                   const margin = 150; // keep away from edges
@@ -622,7 +622,7 @@ export async function createCannonBetUi(options?: {
               }
 
               if (result.isJackpot) {
-                gameAudio.playSoundEffect("coinReward");
+                gameAudio.playSoundEffect("specialCoin");
                 showBigRewardEffect({
                   layer: rewardLayer,
                   x: rewardPos.x,

@@ -2,6 +2,12 @@
   <v-app class="app-root">
     <VSonner position="top-right" :visible-toasts="4" />
 
+    <!-- Rotate-to-landscape warning: only shown after loading has finished
+         (or immediately for unauthenticated users, e.g. login screens) -->
+    <div v-if="showRotateOverlay" class="rotate-overlay">
+      <p>Please rotate your device to landscape</p>
+    </div>
+
     <div v-if="isAuthenticated && isPreloading" class="app-preload">
       <div class="app-preload__bottom">
         <v-progress-linear class="app-preload__bar" color="light-blue" height="10" :model-value="loadProgress" striped
@@ -20,14 +26,23 @@
       </div>
     </div>
 
-    <NuxtLayout v-else>
+    <!-- <div v-else-if="isAuthenticated && readyToEnter && !hasEnteredExperience && !isMobileDevice"
+      class="app-preload app-enter">
+      <div class="app-enter__inner">
+        <button type="button" class="app-enter__button" @click="enterExperience">
+          Tap to Play
+        </button>
+      </div>
+    </div> -->
+
+    <NuxtLayout v-else-if="isAuthenticated ? hasEnteredExperience : true">
       <NuxtPage />
     </NuxtLayout>
   </v-app>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { VSonner } from "vuetify-sonner";
 import "vuetify-sonner/style.css";
 import { useFishAssetPreload } from "~/composables/game_core/assets/useFishAssetPreload";
@@ -43,7 +58,9 @@ const isAuthenticated = computed(() => !!token.value);
 const isPreloading = ref(false);
 const preloadError = ref("");
 const loadProgress = ref(0);
-
+const readyToEnter = ref(false);
+const hasEnteredExperience = ref(false);
+const isMobileDevice = ref(false);
 
 const SESSION_FLAG = "aqua_preload_done_this_session";
 let hasAttemptedThisLoad = false;
@@ -83,10 +100,26 @@ function animateProgressTo(target: number, stepMs = 120) {
   }, stepMs);
 }
 
+function animateProgressToAsync(target: number, stepMs = 30): Promise<void> {
+  return new Promise((resolve) => {
+    clearProgressTimer();
+    progressTimer = setInterval(() => {
+      if (loadProgress.value < target) {
+        loadProgress.value = Math.min(loadProgress.value + 1, target);
+      } else {
+        clearProgressTimer();
+        resolve();
+      }
+    }, stepMs);
+  });
+}
+
 async function runPreload() {
   if (!isAuthenticated.value) return;
-
-  if (manifestStore.ready && wasPreloadedThisSession()) return;
+  if (manifestStore.ready && wasPreloadedThisSession()) {
+    readyToEnter.value = true;
+    return;
+  }
 
   hasAttemptedThisLoad = true;
   isPreloading.value = true;
@@ -107,27 +140,47 @@ async function runPreload() {
 
     manifestStore.ready = true;
     markPreloadedThisSession();
+
+    isPreloading.value = false;
+    readyToEnter.value = true;
   } catch (error) {
     clearProgressTimer();
     preloadError.value =
       error instanceof Error ? error.message : "Unable to preload game assets.";
-  } finally {
     isPreloading.value = false;
   }
 }
 
-function animateProgressToAsync(target: number, stepMs = 30): Promise<void> {
-  return new Promise((resolve) => {
-    clearProgressTimer();
-    progressTimer = setInterval(() => {
-      if (loadProgress.value < target) {
-        loadProgress.value = Math.min(loadProgress.value + 1, target);
-      } else {
-        clearProgressTimer();
-        resolve();
-      }
-    }, stepMs);
-  });
+async function requestFullscreen() {
+  const el = document.documentElement as HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void> | void;
+  };
+  try {
+    if (el.requestFullscreen) {
+      await el.requestFullscreen();
+    } else if (el.webkitRequestFullscreen) {
+      await el.webkitRequestFullscreen();
+    }
+  } catch (e) {
+    console.warn("Fullscreen request failed", e);
+  }
+}
+
+async function lockLandscape() {
+  try {
+    const orientation = screen.orientation as ScreenOrientation & {
+      lock?: (o: string) => Promise<void>;
+    };
+    await orientation?.lock?.("landscape");
+  } catch (e) {
+    console.warn("Orientation lock failed", e);
+  }
+}
+
+async function enterExperience() {
+  await requestFullscreen();
+  await lockLandscape();
+  hasEnteredExperience.value = true;
 }
 
 watch(
@@ -140,13 +193,54 @@ watch(
   { immediate: true },
 );
 
-// Fallback — covers the case where hydrateAccessToken() resolves the
-// token asynchronously/late and the immediate watch fired too early
-// with isAuthenticated === false, so it never ran again.
+/* ---------------- Orientation tracking ---------------- */
+
+const isPortrait = ref(false);
+let orientationMql: MediaQueryList | null = null;
+
+function handleOrientationChange(e: MediaQueryListEvent | MediaQueryList) {
+  isPortrait.value = e.matches;
+}
+
+// Loading is considered "finished" once preload isn't running, there's no
+// error blocking it, and the user has either reached the tap-to-play gate
+// or already entered the experience.
+const loadingFinished = computed(
+  () =>
+    !isPreloading.value &&
+    !preloadError.value &&
+    (readyToEnter.value || hasEnteredExperience.value),
+);
+
+// Show the rotate prompt only once it's safe to do so:
+// - unauthenticated users (e.g. login screen) see it immediately
+// - authenticated users only see it after loading has finished
+const showRotateOverlay = computed(() => {
+  if (!isPortrait.value) return false;
+  if (!isAuthenticated.value) return true;
+  return loadingFinished.value;
+});
+
 onMounted(async () => {
+  isMobileDevice.value = window.matchMedia("(pointer: coarse)").matches;
+
+  orientationMql = window.matchMedia("(orientation: portrait) and (max-width: 900px)");
+  isPortrait.value = orientationMql.matches;
+  orientationMql.addEventListener("change", handleOrientationChange);
+
   await nextTick();
   if (isAuthenticated.value && !hasAttemptedThisLoad) {
     void runPreload();
+  }
+});
+
+onBeforeUnmount(() => {
+  orientationMql?.removeEventListener("change", handleOrientationChange);
+});
+
+watch(readyToEnter, (ready) => {
+  if (ready && isMobileDevice.value && !hasEnteredExperience.value) {
+    void enterExperience();
   }
 });
 </script>
@@ -225,5 +319,61 @@ onMounted(async () => {
   color: #eef8ff;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* ---- Tap-to-play gate ---- */
+.app-enter {
+  align-items: center;
+}
+
+.app-enter__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.app-enter__button {
+  min-width: 200px;
+  height: 52px;
+  padding: 0 32px;
+  border: 1px solid rgba(129, 197, 240, 0.32);
+  border-radius: 999px;
+  background: rgba(16, 33, 48, 0.96);
+  color: #eef8ff;
+  font-weight: 700;
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+/* ---- Rotate-to-landscape overlay ----
+   Visibility is now controlled entirely by JS (showRotateOverlay),
+   not by a CSS @media query, so it can be gated behind loading state. */
+.rotate-overlay {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  z-index: 999999;
+  align-items: center;
+  justify-content: center;
+  background: #06121d;
+  color: #eef8ff;
+  text-align: center;
+  padding: 24px;
+  font-size: 18px;
+  font-weight: 600;
 }
 </style>

@@ -2,6 +2,8 @@ type GameSoundName =
   | "uiClick"
   | "shoot"
   | "coinReward"
+  | "specialCoin"
+  | "specialAddCoin"
   | "bossAlert"
   | "bgmMain"
   | "bgmCrocodile"
@@ -34,6 +36,14 @@ const SOUND_DEFINITIONS: Record<GameSoundName, SoundDefinition> = {
   coinReward: {
     path: "/sounds/fas_fish_normal_coin_1.mp3",
     volume: 0.9,
+  },
+  specialCoin: {
+    path: "/sounds/fas_fish_special_coin.mp3",
+    volume: 0.95,
+  },
+  specialAddCoin: {
+    path: "/sounds/fas_fish_special_add_coin.mp3",
+    volume: 0.95,
   },
   bossAlert: {
     path: "/sounds/fas_alert.mp3",

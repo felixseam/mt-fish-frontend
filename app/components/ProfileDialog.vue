@@ -657,7 +657,7 @@ function close(): void {
 }
 
 .balance-amount {
-  color: #27F53F;
+  color: #ffffff;
   font-weight: 600;
 }
 

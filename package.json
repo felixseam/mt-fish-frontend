@@ -24,6 +24,7 @@
     "@pixi/text-bitmap": "^7.4.3",
     "@tailwindcss/vite": "^4.2.1",
     "@tweenjs/tween.js": "^25.0.0",
+    "@vite-pwa/nuxt": "^1.1.1",
     "gsap": "^3.14.2",
     "nuxt": "^4.2.2",
     "ofetch": "^1.4.1",
@@ -38,8 +39,8 @@
     "vuetify-sonner": "^0.4.2"
   },
   "devDependencies": {
-    "@types/node": "^25.2.3",
     "@types/gsap": "^1.20.2",
+    "@types/node": "^25.2.3",
     "@vitejs/plugin-vue": "^6.0.4",
     "@vue/compiler-sfc": "^3.5.28"
   }

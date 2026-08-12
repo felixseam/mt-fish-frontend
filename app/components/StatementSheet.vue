@@ -24,96 +24,19 @@
           </div>
         </div>
 
-        <v-table class="report-table" fixed-header height="calc(100vh - 220px)">
-          <thead>
-            <tr>
-              <th>លេខ</th>
-              <th>Session No</th>
-              <th>Bet No</th>
-              <th>Ticket No</th>
-              <th>Fish</th>
-              <th>លុយចាក់</th>
-              <th>Valid Bet</th>
-              <th>Invalid Bet</th>
-              <th>Kill</th>
-              <th>Outcome</th>
-              <th>Reward</th>
-              <th>ឈ្នះ/ចាញ់</th>
-              <th>Time</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            <tr v-if="isLoading">
-              <td colspan="13" class="empty">កំពុងទាញយកទិន្នន័យ...</td>
-            </tr>
-
-            <tr v-else-if="errorMessage">
-              <td colspan="13" class="empty">{{ errorMessage }}</td>
-            </tr>
-
-            <template v-else>
-              <tr v-for="(item, index) in reportData" :key="item.bet_no">
-                <td>{{ getRowNo(index) }}</td>
-                <td>{{ item.session_no }}</td>
-                <td>{{ item.bet_no }}</td>
-                <td>{{ item.ticket_no }}</td>
-                <td>{{ item.fish_type_name }}</td>
-                <td>{{ formatAmount(parseAmount(item.bet_amount)) }}</td>
-                <td>{{ formatAmount(parseAmount(item.bet_valid)) }}</td>
-                <td>{{ formatAmount(parseAmount(item.bet_invalid)) }}</td>
-                <td>{{ item.is_kill ? 'Yes' : 'No' }}</td>
-                <td :class="item.win_lose === 'win' ? 'positive' : 'negative'">
-                  {{ item.win_lose }}
-                </td>
-                <td>{{ formatAmount(getRewardAmount(item)) }}</td>
-                <td :class="parseAmount(item.total_win_lose) >= 0 ? 'positive' : 'negative'">
-                  {{ formatAmount(parseAmount(item.total_win_lose)) }}
-                </td>
-                <td>{{ formatDateTime(item.created_at) }}</td>
-              </tr>
-
-              <!-- Page subtotal -->
-              <tr v-if="reportData.length > 0" class="summary-row">
-                <td colspan="5" class="summary-label">សរុបក្នុងមួយទំព័រ</td>
-                <td>{{ formatAmount(pageBetTotal) }}</td>
-                <td>{{ formatAmount(pageValidTotal) }}</td>
-                <td>{{ formatAmount(pageInvalidTotal) }}</td>
-                <td>-</td>
-                <td>-</td>
-                <td>-</td>
-                <td :class="pageWinLoseTotal >= 0 ? 'positive' : 'negative'">
-                  {{ formatAmount(pageWinLoseTotal) }}
-                </td>
-                <td></td>
-              </tr>
-
-              <!-- Grand total from API total_report -->
-              <tr v-if="reportData.length > 0" class="summary-row grand-total-row">
-                <td colspan="5" class="summary-label">សរុបទាំងអស់</td>
-                <td>{{ formatAmount(allBetTotal) }}</td>
-                <td>{{ formatAmount(allValidTotal) }}</td>
-                <td>-</td>
-                <td>-</td>
-                <td>-</td>
-                <td>-</td>
-                <td :class="allWinLoseTotal >= 0 ? 'positive' : 'negative'">
-                  {{ formatAmount(allWinLoseTotal) }}
-                </td>
-                <td></td>
-              </tr>
-
-              <tr v-if="reportData.length === 0">
-                <td colspan="13" class="empty">គ្មានទិន្នន័យ</td>
-              </tr>
-            </template>
-          </tbody>
-        </v-table>
-
-        <div class="pagination">
-          <v-pagination v-model="currentPage" :length="totalPages" :total-visible="5" density="compact"
-            rounded="circle" />
-        </div>
+        <AppTable
+          :columns="columns"
+          :items="reportData"
+          :loading="isLoading"
+          :error="errorMessage"
+          height="calc(100vh - 220px)"
+          :page="currentPage"
+          :page-size="itemsPerPage"
+          :total-pages="totalPages"
+          :subtotals="pageSubtotals"
+          :grand-totals="grandTotalsRow"
+          @update:page="currentPage = $event"
+        />
       </v-card-text>
     </v-card>
   </v-bottom-sheet>
@@ -122,6 +45,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { getStatements, type StatementItem } from "~/composables/service/statementApi";
+import AppTable, { type TableColumn, type TotalRow } from "~/components/common/AppTable.vue";
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -137,6 +61,57 @@ const errorMessage = ref("");
 const allBetTotal = ref(0);
 const allValidTotal = ref(0);
 const allWinLoseTotal = ref(0);
+
+// ── Columns ──────────────────────────────────────────────────────────────────
+
+const columns: TableColumn<StatementItem>[] = [
+  { key: "index", label: "លេខ", type: "index" },
+  { key: "session_no", label: "Session No" },
+  { key: "bet_no", label: "Bet No" },
+  { key: "ticket_no", label: "Ticket No" },
+  { key: "fish_type_name", label: "Fish" },
+  {
+    key: "bet_amount",
+    label: "លុយចាក់",
+    format: (_v, item) => formatAmount(parseAmount(item.bet_amount)),
+  },
+  {
+    key: "bet_valid",
+    label: "Valid Bet",
+    format: (_v, item) => formatAmount(parseAmount(item.bet_valid)),
+  },
+  {
+    key: "bet_invalid",
+    label: "Invalid Bet",
+    format: (_v, item) => formatAmount(parseAmount(item.bet_invalid)),
+  },
+  {
+    key: "is_kill",
+    label: "Kill",
+    format: (_v, item) => (item.is_kill ? "Yes" : "No"),
+  },
+  {
+    key: "win_lose",
+    label: "Outcome",
+    cellClass: (item) => (item.win_lose === "win" ? "positive" : "negative"),
+  },
+  {
+    key: "reward",
+    label: "Reward",
+    format: (_v, item) => formatAmount(getRewardAmount(item)),
+  },
+  {
+    key: "total_win_lose",
+    label: "ឈ្នះ/ចាញ់",
+    format: (_v, item) => formatAmount(parseAmount(item.total_win_lose)),
+    cellClass: (item) => (parseAmount(item.total_win_lose) >= 0 ? "positive" : "negative"),
+  },
+  {
+    key: "created_at",
+    label: "Time",
+    format: (_v, item) => formatDateTime(item.created_at),
+  },
+];
 
 // ── Computed ─────────────────────────────────────────────────────────────────
 
@@ -156,6 +131,50 @@ const pageInvalidTotal = computed(() =>
 const pageWinLoseTotal = computed(() =>
   reportData.value.reduce((sum, item) => sum + parseAmount(item.total_win_lose), 0),
 );
+
+const pageSubtotals = computed<TotalRow | undefined>(() => {
+  if (!reportData.value.length) return undefined;
+  return {
+    labelSpan: 5,
+    pageLabel: "សរុបក្នុងមួយទំព័រ",
+    cols: [
+      { key: "bet_amount", value: formatAmount(pageBetTotal.value) },
+      { key: "bet_valid", value: formatAmount(pageValidTotal.value) },
+      { key: "bet_invalid", value: formatAmount(pageInvalidTotal.value) },
+      { key: "is_kill", value: "-" },
+      { key: "win_lose", value: "-" },
+      { key: "reward", value: "-" },
+      {
+        key: "total_win_lose",
+        value: formatAmount(pageWinLoseTotal.value),
+        class: pageWinLoseTotal.value >= 0 ? "positive" : "negative",
+      },
+      { key: "created_at", value: "" },
+    ],
+  };
+});
+
+const grandTotalsRow = computed<TotalRow | undefined>(() => {
+  if (!reportData.value.length) return undefined;
+  return {
+    labelSpan: 5,
+    pageLabel: "សរុបទាំងអស់",
+    cols: [
+      { key: "bet_amount", value: formatAmount(allBetTotal.value) },
+      { key: "bet_valid", value: formatAmount(allValidTotal.value) },
+      { key: "bet_invalid", value: "-" },
+      { key: "is_kill", value: "-" },
+      { key: "win_lose", value: "-" },
+      { key: "reward", value: "-" },
+      {
+        key: "total_win_lose",
+        value: formatAmount(allWinLoseTotal.value),
+        class: allWinLoseTotal.value >= 0 ? "positive" : "negative",
+      },
+      { key: "created_at", value: "" },
+    ],
+  };
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -190,10 +209,6 @@ function formatDateTime(value: string): string {
     second: "2-digit",
     hour12: false,
   }).format(date);
-}
-
-function getRowNo(index: number): number {
-  return (currentPage.value - 1) * itemsPerPage + index + 1;
 }
 
 function getRewardAmount(item: StatementItem): number {
@@ -327,103 +342,5 @@ defineExpose({ open });
 
 .ocean-input :deep(input) {
   color: rgb(var(--v-theme-on-surface)) !important;
-}
-
-.report-table {
-  background: transparent !important;
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.report-table :deep(table) {
-  border-collapse: collapse;
-  width: 100%;
-}
-
-.report-table :deep(thead th) {
-  background: rgb(var(--v-theme-primary)) !important;
-  color: rgb(var(--v-theme-on-primary)) !important;
-  font-weight: 700 !important;
-  font-size: 13px !important;
-  text-align: center !important;
-  border: 1.5px solid rgb(var(--v-theme-secondary)) !important;
-  white-space: nowrap;
-}
-
-.report-table :deep(tbody td) {
-  background: rgb(var(--v-theme-surface)) !important;
-  color: rgb(var(--v-theme-on-surface)) !important;
-  border: 1px solid rgb(var(--v-theme-secondary)) !important;
-  text-align: center !important;
-  font-size: 12px;
-}
-
-.report-table :deep(tbody tr:nth-child(even) td) {
-  background: rgba(var(--v-theme-primary), 0.06) !important;
-}
-
-.report-table :deep(tbody tr:hover td) {
-  background: rgba(var(--v-theme-primary), 0.14) !important;
-  transition: background 0.2s ease;
-}
-
-.report-table :deep(tbody tr.summary-row td) {
-  background: rgba(var(--v-theme-primary), 0.10) !important;
-  font-weight: 700 !important;
-  font-size: 12px !important;
-}
-
-.report-table :deep(tbody tr.grand-total-row td) {
-  background: rgba(var(--v-theme-primary), 0.20) !important;
-}
-
-.report-table :deep(tbody tr.summary-row td.summary-label) {
-  text-align: right !important;
-  color: rgb(var(--v-theme-primary)) !important;
-  padding-right: 12px !important;
-}
-
-.report-table :deep(tbody td.positive) {
-  color: rgb(var(--v-theme-success)) !important;
-  font-weight: 700 !important;
-}
-
-.report-table :deep(tbody td.negative) {
-  color: rgb(var(--v-theme-warning)) !important;
-  font-weight: 700 !important;
-}
-
-.empty {
-  padding: 20px;
-  color: rgb(var(--v-theme-primary));
-  text-align: center;
-  background: rgb(var(--v-theme-background)) !important;
-}
-
-.pagination {
-  display: flex;
-  justify-content: center;
-  margin-top: 15px;
-}
-
-.pagination :deep(.v-pagination__item button),
-.pagination :deep(.v-pagination__prev button),
-.pagination :deep(.v-pagination__next button) {
-  background: rgb(var(--v-theme-surface)) !important;
-  color: rgb(var(--v-theme-primary)) !important;
-  border: 1px solid rgb(var(--v-theme-secondary)) !important;
-}
-
-.pagination :deep(.v-pagination__item--is-active button) {
-  background: rgb(var(--v-theme-primary)) !important;
-  color: rgb(var(--v-theme-on-primary)) !important;
-  border-color: rgb(var(--v-theme-secondary)) !important;
-}
-
-.pagination :deep(.v-pagination__item button:hover),
-.pagination :deep(.v-pagination__prev button:hover),
-.pagination :deep(.v-pagination__next button:hover) {
-  background: rgba(var(--v-theme-primary), 0.14) !important;
-  color: rgb(var(--v-theme-primary)) !important;
 }
 </style>

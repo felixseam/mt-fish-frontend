@@ -1,490 +1,3 @@
-<template>
-  <!-- ── Insufficient Coins Dialog ── -->
-  <v-dialog v-model="insufficientCoinsVisible" max-width="360" persistent :scrim="true"
-    scrim-color="rgba(0,0,0,0.75)" transition="dialog-bottom-transition">
-    <v-card class="ocean-card insufficient-card" rounded="xl">
-      <div class="insufficient-body">
-        <!-- Animated coin icon -->
-        <div class="insufficient-icon-wrap">
-          <div class="insufficient-icon-ring" />
-          <v-icon color="#fac775" size="38">mdi-circle-multiple-outline</v-icon>
-        </div>
-
-        <div class="insufficient-title">{{ t('balance.notEnoughCoinsTitle') }}</div>
-        <div class="insufficient-desc">
-          {{ t('balance.notEnoughCoinsMessage') }}<br />
-          {{ t('balance.notEnoughCoinsSubmessage') }}
-        </div>
-
-        <!-- Coin status -->
-        <div class="insufficient-status-row">
-          <div class="insuf-stat">
-            <div class="insuf-stat-label">{{ t('balance.youHave') }}</div>
-            <div class="insuf-stat-value" style="color:#fac775">{{ formatCoins(currentCoinBalance) }}</div>
-            <div class="insuf-stat-unit">{{ t('balance.coins') }}</div>
-          </div>
-          <div class="insuf-arrow">
-            <v-icon color="rgba(173,228,242,0.25)" size="18">mdi-arrow-right</v-icon>
-          </div>
-          <div class="insuf-stat">
-            <div class="insuf-stat-label">{{ t('balance.betRequires') }}</div>
-            <div class="insuf-stat-value" style="color:#f09595">{{ formatCoins(insufficientBetAmount) }}</div>
-            <div class="insuf-stat-unit">{{ t('balance.coins') }}</div>
-          </div>
-        </div>
-
-        <div class="insufficient-actions">
-          <v-btn variant="flat" class="ocean-btn-confirm insuf-exchange-btn" @click="openExchangeFromInsufficient">
-            <v-icon start size="15">mdi-swap-horizontal</v-icon>
-            {{ t('balance.exchangeCoinsNow') }}
-          </v-btn>
-          <v-btn variant="text" class="insuf-cancel-btn" @click="closeInsufficientDialog">
-            {{ t('common.cancel') }}
-          </v-btn>
-        </div>
-      </div>
-    </v-card>
-  </v-dialog>
-
-  <!-- ── Main Exchange Dialog ── -->
-  <v-dialog v-model="internalVisible" max-width="500" persistent :scrim="true" scrim-color="rgba(0,0,0,0.75)"
-    transition="dialog-bottom-transition" :fullscreen="$vuetify.display.xs" @update:model-value="onDialogUpdate">
-    <v-card class="ocean-card" rounded="xl">
-
-      <!-- ── Header ── -->
-      <v-card-title class="ocean-header d-flex align-center gap-3 pa-4">
-        <div class="header-icon" :class="headerIconClass">
-          <v-icon :color="headerIconColor" size="20">{{ headerIcon }}</v-icon>
-        </div>
-        <span class="text-subtitle-1 font-weight-medium text-white">{{ headerTitle }}</span>
-        <v-spacer />
-        <v-btn icon variant="text" size="small" @click="close">
-          <v-icon color="rgba(173,228,242,0.5)" size="18">mdi-close</v-icon>
-        </v-btn>
-      </v-card-title>
-
-      <v-divider color="rgba(58,168,232,0.15)" />
-
-      <!-- ── Tab bar (hidden on confirm/success steps) ── -->
-      <div v-if="currentStep === 'form'" class="tab-bar">
-        <button class="exchange-tab" :class="{ 'tab-active-b2c': activeTab === 'b2c' }" @click="switchTab('b2c')">
-          <div class="tab-inner">
-            <div class="tab-icon-wrap tab-icon-b2c">
-              <v-icon size="14">mdi-wallet-outline</v-icon>
-            </div>
-            <div class="tab-text-wrap">
-              <span class="tab-label">{{ t('balance.topUpCoins') }}</span>
-              <!-- <span class="tab-desc">Balance → Coins</span> -->
-            </div>
-          </div>
-        </button>
-        <button class="exchange-tab" :class="{ 'tab-active-c2b': activeTab === 'c2b' }" @click="switchTab('c2b')">
-          <div class="tab-inner">
-            <div class="tab-icon-wrap tab-icon-c2b">
-              <v-icon size="14">mdi-circle-multiple-outline</v-icon>
-            </div>
-            <div class="tab-text-wrap">
-              <span class="tab-label">{{ t('balance.cashOut') }}</span>
-              <!-- <span class="tab-desc">Coins → Balance</span> -->
-            </div>
-          </div>
-        </button>
-      </div>
-
-      <!-- ══════════════════════════════════════════════════════════
-           FORM STEP
-      ══════════════════════════════════════════════════════════ -->
-      <template v-if="currentStep === 'form'">
-
-        <!-- ── B2C: Top Up Coins ── -->
-        <div v-if="activeTab === 'b2c'" class="step-scroll-body">
-          <div class="pa-4">
-            <!-- Currency selector -->
-            <div class="slabel mb-2">{{ t('balance.payWith') }}</div>
-            <div class="bar-outer mb-3">
-              <button class="bar-arrow-btn" :class="{ hidden: balBarAtStart }" @click="scrollBalBar(-1)">
-                <v-icon size="13">mdi-chevron-left</v-icon>
-              </button>
-              <div class="bar-scroll-area">
-                <div ref="balBarRef" class="bar-scroll-track" @scroll="updateBalBarArrows">
-                  <template v-for="(bal, i) in walletBalances" :key="bal.currency_id">
-                    <div v-if="i > 0" class="bar-sep" />
-                    <button class="bar-bal-item"
-                      :class="{ 'bar-bal-item-active': selectedCurrency === bal.currency_code }"
-                      :disabled="isLoadingForm || isLoadingPackages" @click="onSelectCurrency(bal.currency_code)">
-                      <div class="bar-bal-code">{{ bal.currency_code }}</div>
-                      <div class="bar-bal-amount">{{ formatCurrencyByCode(toNumber(bal.amount), bal.currency_code) }}</div>
-                    </button>
-                  </template>
-                </div>
-              </div>
-              <button class="bar-arrow-btn" :class="{ hidden: balBarAtEnd }" @click="scrollBalBar(1)">
-                <v-icon size="13">mdi-chevron-right</v-icon>
-              </button>
-            </div>
-
-            <!-- Rate info -->
-            <div class="rate-bar mb-3">
-              <v-icon size="13" color="#5fd4b0" class="mr-1">mdi-information-outline</v-icon>
-              <span class="rate-text">
-                {{ t('balance.rate') }} <strong>{{ t('balance.oneCoin') }}</strong> = {{ ratePerCoinFormatted }}
-              </span>
-            </div>
-
-            <!-- Packages -->
-            <div class="slabel mb-2">{{ t('balance.selectPackage') }}</div>
-
-            <div v-if="isLoadingPackages" class="pkg-empty-state mb-2">{{ t('common.loading') }}</div>
-
-            <div v-else-if="packages.length" class="pkg-list mb-2">
-              <div v-for="pkg in packages" :key="pkg.id" class="pkg-card"
-                :class="{ 'pkg-selected': selectedPackage?.id === pkg.id && !isCustomMode, 'pkg-popular': pkg.popular }"
-                @click="selectPackage(pkg)">
-                <div class="pkg-icon-wrap">
-                  <v-icon :color="pkg.popular ? '#fac775' : '#44d7c5'" size="19">mdi-circle-multiple-outline</v-icon>
-                </div>
-                <div class="pkg-info">
-                  <div class="pkg-title">
-                    {{ formatCoins(pkg.coinAmount) }} {{ t('balance.coins') }}
-                    <span v-if="pkg.popular" class="pkg-popular-tag">
-                      <v-icon size="9">mdi-star</v-icon> {{ t('balance.popular') }}
-                    </span>
-                  </div>
-                  <div class="pkg-subtitle">
-                    {{ pkg.name }}
-                    <template v-if="pkg.description">· {{ pkg.description }}</template>
-                  </div>
-                </div>
-                <div class="pkg-right">
-                  <div class="pkg-price" :style="pkg.popular ? 'color:#fac775' : ''">
-                    {{ formatCurrencyByCode(pkg.priceAmount, pkg.currencyCode) }}
-                  </div>
-                  <div class="pkg-price-sub">{{ pkg.currencyCode }}</div>
-                </div>
-                <div class="pkg-check">
-                  <div class="pkg-check-inner" />
-                </div>
-              </div>
-            </div>
-
-            <div v-else class="pkg-empty-state mb-2">
-              {{ t('balance.noPackagesAvailable') }}
-            </div>
-
-            <!-- OR divider -->
-            <div class="or-divider mb-3">
-              <div class="or-line" /><span class="or-text">{{ t('balance.orCustom') }}</span>
-              <div class="or-line" />
-            </div>
-
-            <!-- Custom amount -->
-            <div class="pkg-card custom-pkg-card mb-1" :class="{ 'pkg-selected': isCustomMode }">
-              <div class="pkg-icon-wrap">
-                <v-icon color="rgba(173,228,242,0.5)" size="17">mdi-pencil-outline</v-icon>
-              </div>
-              <div class="pkg-info">
-                <div class="custom-label mb-1">{{ t('balance.enterCoinAmount') }}</div>
-                <div class="custom-input-row">
-                  <input v-model.number="customAmount" type="number" class="custom-input"
-                    :placeholder="t('balance.customPlaceholder')" min="100" step="100" @input="onCustomInput" />
-                  <span class="custom-unit">{{ t('balance.coins') }}</span>
-                </div>
-                <div v-if="(customAmount ?? 0) > 0 && !canAffordCustom" class="custom-error mt-1">
-                  <v-icon size="11" color="#f09595">mdi-alert-circle-outline</v-icon>
-                  {{ t('balance.insufficientCurrency', { currency: selectedCurrency }) }}
-                </div>
-              </div>
-              <div class="pkg-right">
-                <div class="pkg-price" style="color:#5fd4b0;font-size:13px">{{ customCostFormatted }}</div>
-                <div class="pkg-price-sub">{{ t('balance.minCoins') }}</div>
-              </div>
-              <div class="pkg-check">
-                <div class="pkg-check-inner" />
-              </div>
-            </div>
-
-            <!-- Summary -->
-            <div v-if="b2cFinalCoins > 0 && canAffordFinal" class="summary-row mt-4">
-              <div>
-                <div class="summary-label">{{ t('balance.youWillReceive') }}</div>
-                <div class="summary-value" style="color:#44d7c5">
-                  <v-icon size="13" color="#44d7c5">mdi-circle-multiple-outline</v-icon>
-                  {{ formatCoins(b2cFinalCoins) }} {{ t('balance.coins') }}
-                </div>
-              </div>
-              <v-icon color="rgba(173,228,242,0.3)" size="17">mdi-arrow-right</v-icon>
-              <div class="text-right">
-                <div class="summary-label">{{ t('balance.deductedFrom', { currency: selectedCurrency }) }}</div>
-                <div class="summary-value" style="color:#fac775">{{ b2cFinalCostFormatted }}</div>
-              </div>
-            </div>
-
-            <!-- After balance preview -->
-            <div v-if="b2cFinalCoins > 0 && canAffordFinal" class="after-balance-row mt-2">
-              <div class="ab-item">
-                <div class="ab-label">{{ t('balance.coinsAfter') }}</div>
-                <div class="ab-value" style="color:#44d7c5">{{ formatCoins(currentCoinBalance + b2cFinalCoins) }}</div>
-              </div>
-              <div class="ab-divider" />
-              <div class="ab-item">
-                <div class="ab-label">{{ t('balance.currencyAfter', { currency: selectedCurrency }) }}</div>
-                <div class="ab-value" style="color:#fac775">{{ b2cAfterCurrencyBalance }}</div>
-              </div>
-            </div>
-
-            <!-- Warning -->
-            <div class="warn-box mt-3">
-              <v-icon size="13" color="#fac775" class="mt-1 flex-shrink-0">mdi-alert-triangle-outline</v-icon>
-              <span>{{ t('balance.warning', { currency: selectedCurrency }) }}</span>
-            </div>
-
-          </div>
-        </div>
-
-        <!-- ── C2B: Cash Out (Coins → Balance) ── -->
-        <div v-else class="step-scroll-body">
-          <div class="pa-4">
-
-            <!-- Currency selector -->
-            <div class="slabel mb-2">{{ t('balance.receiveInto') }}</div>
-            <div class="bar-outer mb-3">
-              <button class="bar-arrow-btn" :class="{ hidden: balBarAtStart }" @click="scrollBalBar(-1)">
-                <v-icon size="13">mdi-chevron-left</v-icon>
-              </button>
-              <div class="bar-scroll-area">
-                <div ref="balBarRef" class="bar-scroll-track" @scroll="updateBalBarArrows">
-                  <template v-for="(bal, i) in walletBalances" :key="bal.currency_id">
-                    <div v-if="i > 0" class="bar-sep" />
-                    <button class="bar-bal-item"
-                      :class="{ 'bar-bal-item-active': selectedCurrency === bal.currency_code }"
-                      :disabled="isLoadingForm" @click="onSelectCurrency(bal.currency_code)">
-                      <div class="bar-bal-code">{{ bal.currency_code }}</div>
-                      <div class="bar-bal-amount">{{ formatCurrencyByCode(toNumber(bal.amount), bal.currency_code) }}</div>
-                    </button>
-                  </template>
-                </div>
-              </div>
-              <button class="bar-arrow-btn" :class="{ hidden: balBarAtEnd }" @click="scrollBalBar(1)">
-                <v-icon size="13">mdi-chevron-right</v-icon>
-              </button>
-            </div>
-
-            <!-- Rate info -->
-            <div class="rate-bar mb-3">
-              <v-icon size="13" color="#5fd4b0" class="mr-1">mdi-information-outline</v-icon>
-              <span class="rate-text">
-                {{ t('balance.rate') }} <strong>{{ t('balance.oneCoin') }}</strong> = {{ ratePerCoinFormatted }}
-              </span>
-            </div>
-
-            <!-- Coin balance badge -->
-            <div class="coin-balance-badge mb-3">
-              <v-icon color="#fac775" size="20" class="mr-2">mdi-circle-multiple-outline</v-icon>
-              <div>
-                <div class="balance-label">{{ t('balance.availableCoins') }}</div>
-                <div class="balance-value">{{ formatCoins(currentCoinBalance) }}</div>
-              </div>
-            </div>
-
-            <!-- Coin amount input -->
-            <div class="slabel mb-2">{{ t('balance.coinsToCashOut') }}</div>
-            <div class="inp-card mb-3" :class="{ 'inp-card-focus': c2bCoins > 0 }">
-              <div class="inp-row">
-                <input v-model.number="c2bCoins" type="number" class="big-input" placeholder="0" min="100" step="100"
-                  @input="onC2BInput" />
-                <span class="inp-unit">{{ t('balance.coins') }}</span>
-              </div>
-              <div class="inp-cost" :style="c2bCoins > 0 ? 'color:#44d7c5' : 'color:rgba(173,228,242,0.3)'">
-                {{ c2bCoins > 0 ? '≈ ' + formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) : '—' }}
-              </div>
-              <div v-if="c2bErrorMsg" class="custom-error mt-1">
-                <v-icon size="11" color="#f09595">mdi-alert-circle-outline</v-icon>
-                {{ c2bErrorMsg }}
-              </div>
-            </div>
-
-            <!-- Summary -->
-            <div v-if="c2bCoins >= 100 && !c2bErrorMsg" class="summary-row mt-1">
-              <div>
-                <div class="summary-label">{{ t('balance.youSpend') }}</div>
-                <div class="summary-value" style="color:#fac775">
-                  <v-icon size="13" color="#fac775">mdi-circle-multiple-outline</v-icon>
-                  {{ formatCoins(c2bCoins) }} {{ t('balance.coins') }}
-                </div>
-              </div>
-              <v-icon color="rgba(173,228,242,0.3)" size="17">mdi-arrow-right</v-icon>
-              <div class="text-right">
-                <div class="summary-label">{{ t('balance.youReceive') }}</div>
-                <div class="summary-value" style="color:#44d7c5">
-                  {{ formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) }}
-                </div>
-              </div>
-            </div>
-
-            <div v-if="c2bCoins >= 100 && !c2bErrorMsg" class="after-balance-row mt-2">
-              <div class="ab-item">
-                <div class="ab-label">{{ t('balance.coinsAfter') }}</div>
-                <div class="ab-value" style="color:#fac775">{{ formatCoins(Math.max(0, currentCoinBalance - c2bCoins)) }}</div>
-              </div>
-              <div class="ab-divider" />
-              <div class="ab-item">
-                <div class="ab-label">{{ t('balance.currencyAfter', { currency: selectedCurrency }) }}</div>
-                <div class="ab-value" style="color:#44d7c5">{{ c2bAfterCurrencyBalance }}</div>
-              </div>
-            </div>
-
-            <!-- Warning -->
-            <!-- <div class="warn-box mt-3">
-              <v-icon size="13" color="#fac775" class="mt-1 flex-shrink-0">mdi-alert-triangle-outline</v-icon>
-              <span>{{ t('balance.c2bWarning') }}</span>
-            </div> -->
-
-          </div>
-        </div>
-
-      </template>
-
-      <!-- ══════════════════════════════════════════════════════════
-           CONFIRM STEP
-      ══════════════════════════════════════════════════════════ -->
-      <template v-else-if="currentStep === 'confirm'">
-        <div class="pa-4" style="display:flex;flex-direction:column;gap:14px">
-
-          <p class="ocean-subtitle">
-            <template v-if="activeTab === 'b2c'">
-              {{ t('balance.confirmMessage', {
-                amount: b2cFinalCostFormatted,
-                currency: selectedCurrency,
-                coins: formatCoins(b2cFinalCoins),
-              }) }}
-            </template>
-            <template v-else>
-              {{ t('balance.cashOutConfirmMessage', {
-                coins: formatCoins(c2bCoins),
-                amount: formatCurrencyByCode(c2bReceiveAmount, selectedCurrency),
-                currency: selectedCurrency,
-              }) }}
-            </template>
-          </p>
-
-          <!-- B2C confirm detail -->
-          <div v-if="activeTab === 'b2c'" class="confirm-detail-row">
-            <div class="detail-item">
-              <v-icon size="15" color="#fac775" class="mb-1">mdi-cash-minus</v-icon>
-              <div class="detail-label">{{ t('balance.deducted') }}</div>
-              <div class="detail-value" style="color:#fac775">-{{ b2cFinalCostFormatted }}</div>
-              <div class="detail-sub">{{ t('balance.fromCurrency', { currency: selectedCurrency }) }}</div>
-            </div>
-            <div class="detail-divider" />
-            <div class="detail-item">
-              <v-icon size="15" color="#44d7c5" class="mb-1">mdi-circle-multiple-outline</v-icon>
-              <div class="detail-label">{{ t('balance.youReceive') }}</div>
-              <div class="detail-value" style="color:#44d7c5">+{{ formatCoins(b2cFinalCoins) }}</div>
-              <div class="detail-sub">{{ t('balance.coins') }}</div>
-            </div>
-            <div class="detail-divider" />
-            <div class="detail-item">
-              <v-icon size="15" color="rgba(173,228,242,0.6)" class="mb-1">mdi-wallet-outline</v-icon>
-              <div class="detail-label">{{ t('balance.balanceAfter') }}</div>
-              <div class="detail-value" style="font-size:12px">{{ b2cAfterCurrencyBalance }}</div>
-              <div class="detail-sub">{{ t('balance.currencyLeft', { currency: selectedCurrency }) }}</div>
-            </div>
-          </div>
-
-          <!-- C2B confirm detail -->
-          <div v-else class="confirm-detail-row">
-            <div class="detail-item">
-              <v-icon size="15" color="#fac775" class="mb-1">mdi-circle-multiple-outline</v-icon>
-              <div class="detail-label">{{ t('balance.deducted') }}</div>
-              <div class="detail-value" style="color:#fac775">-{{ formatCoins(c2bCoins) }}</div>
-              <div class="detail-sub">{{ t('balance.coins') }}</div>
-            </div>
-            <div class="detail-divider" />
-            <div class="detail-item">
-              <v-icon size="15" color="#44d7c5" class="mb-1">mdi-wallet-outline</v-icon>
-              <div class="detail-label">{{ t('balance.youReceive') }}</div>
-              <div class="detail-value" style="color:#44d7c5">+{{ formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) }}</div>
-              <div class="detail-sub">{{ selectedCurrency }}</div>
-            </div>
-            <div class="detail-divider" />
-            <div class="detail-item">
-              <v-icon size="15" color="rgba(173,228,242,0.6)" class="mb-1">mdi-circle-multiple-outline</v-icon>
-              <div class="detail-label">{{ t('balance.coinsAfter') }}</div>
-              <div class="detail-value" style="font-size:12px">{{ formatCoins(Math.max(0, currentCoinBalance - c2bCoins)) }}</div>
-              <div class="detail-sub">{{ t('balance.remaining') }}</div>
-            </div>
-          </div>
-
-          <v-alert type="warning" variant="tonal" density="compact" border="start" color="amber">
-            <span style="font-size:12px">
-              <template v-if="activeTab === 'b2c'">
-                {{ t('balance.warning', { currency: selectedCurrency }) }}
-              </template>
-              <template v-else>
-                {{ t('balance.c2bConfirmWarning') }}
-              </template>
-            </span>
-          </v-alert>
-
-        </div>
-      </template>
-
-      <!-- ══════════════════════════════════════════════════════════
-           SUCCESS STEP
-      ══════════════════════════════════════════════════════════ -->
-      <template v-else-if="currentStep === 'success'">
-        <div class="success-body">
-          <v-icon color="#44d7c5" size="52">mdi-check-circle-outline</v-icon>
-          <div class="success-title">{{ t('balance.exchangeSuccessfulTitle') }}</div>
-          <div class="success-pill">
-            <template v-if="activeTab === 'b2c'">+{{ formatCoins(b2cFinalCoins) }} {{ t('balance.coins') }}</template>
-            <template v-else>+{{ formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) }}</template>
-          </div>
-          <div class="success-sub">
-            <template v-if="activeTab === 'b2c'">−{{ b2cFinalCostFormatted }} {{ t('balance.deductedFrom', { currency: selectedCurrency }) }}</template>
-            <template v-else>−{{ formatCoins(c2bCoins) }} {{ t('balance.coinsDeducted') }}</template>
-          </div>
-          <v-btn variant="flat" class="ocean-btn-confirm mt-4" style="width:160px" @click="close">
-            <v-icon start size="15">mdi-check</v-icon> {{ t('common.done') }}
-          </v-btn>
-        </div>
-      </template>
-
-      <v-divider v-if="currentStep !== 'success'" color="rgba(58,168,232,0.1)" />
-
-      <!-- ── Footer buttons ── -->
-      <v-card-actions v-if="currentStep !== 'success'" class="px-4 py-3 gap-3">
-
-        <!-- Form step -->
-        <template v-if="currentStep === 'form'">
-          <v-btn variant="outlined" color="rgba(173,228,242,0.4)" class="ocean-btn-cancel flex-grow-1" @click="close">
-            {{ t('common.cancel') }}
-          </v-btn>
-          <v-btn variant="flat" class="ocean-btn-confirm flex-grow-1"
-            :disabled="!isFormValid || isLoadingForm || isLoadingPackages" @click="goToConfirm">
-            {{ t('common.confirm') }}
-            <v-icon end size="15">mdi-arrow-right</v-icon>
-          </v-btn>
-        </template>
-
-        <!-- Confirm step -->
-        <template v-else-if="currentStep === 'confirm'">
-          <v-btn variant="outlined" color="rgba(173,228,242,0.4)" class="ocean-btn-cancel flex-grow-1" @click="backToForm">
-            <v-icon start size="15">mdi-arrow-left</v-icon>
-            {{ t('common.back') }}
-          </v-btn>
-          <v-btn variant="flat" class="ocean-btn-danger flex-grow-1" :loading="purchasing" @click="confirmExchange">
-            <v-icon start size="15">mdi-check-circle-outline</v-icon>
-            {{ t('balance.confirmExchange') }}
-          </v-btn>
-        </template>
-
-      </v-card-actions>
-
-    </v-card>
-  </v-dialog>
-</template>
-
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { sonnerToast } from '~/utils/sonnerToast'
@@ -502,7 +15,7 @@ import {
 
 const { t } = useFrontendI18n()
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
+//  Types 
 interface CoinPackage {
   id: number
   name: string
@@ -524,7 +37,7 @@ export interface PurchasePayload {
   direction: TabMode
 }
 
-// ─── Props / Emits ─────────────────────────────────────────────────────────────
+//  Props / Emits 
 const props = withDefaults(defineProps<{
   modelValue: boolean
   currentBalance?: number
@@ -541,14 +54,14 @@ const emit = defineEmits<{
   'purchase-confirmed': [payload: PurchasePayload]
 }>()
 
-// ─── Dialog visibility ─────────────────────────────────────────────────────────
+//  Dialog visibility 
 const internalVisible = ref(false)
 
 function onDialogUpdate(val: boolean) {
   if (!val) close()
 }
 
-// ─── Insufficient coins dialog state ──────────────────────────────────────────
+//  Insufficient coins dialog state 
 const insufficientCoinsVisible = ref(false)
 const insufficientBetAmount = ref(0)
 
@@ -574,31 +87,31 @@ function openExchangeFromInsufficient() {
   void openDialog()
 }
 
-// ─── Tab / Step state ──────────────────────────────────────────────────────────
+//  Tab / Step state 
 const activeTab = ref<TabMode>('b2c')
 const currentStep = ref<StepName>('form')
 
-// ─── Shared form state ─────────────────────────────────────────────────────────
+//  Shared form state 
 const selectedCurrency = ref<CurrencyCode>('USD')
 const isLoadingForm = ref(false)
 const isLoadingPackages = ref(false)
 const purchasing = ref(false)
 
-// ─── API data ──────────────────────────────────────────────────────────────────
+//  API data 
 const walletBalances = ref<ExchangeFormBalance[]>([])
 const currentCoinBalance = ref(0)
 const currentCurrencyId = ref<number | null>(null)
 const exchangeRateByCurrencyId = ref<Record<number, number>>({})
 
-// ─── B2C state ─────────────────────────────────────────────────────────────────
+//  B2C state 
 const packages = ref<CoinPackage[]>([])
 const selectedPackage = ref<CoinPackage | null>(null)
 const customAmount = ref<number | null>(null)
 
-// ─── C2B state ─────────────────────────────────────────────────────────────────
+//  C2B state 
 const c2bCoins = ref<number>(0)
 
-// ─── Balance bar scroll ────────────────────────────────────────────────────────
+//  Balance bar scroll 
 const balBarRef = ref<HTMLElement | null>(null)
 const balBarAtStart = ref(true)
 const balBarAtEnd = ref(false)
@@ -614,11 +127,11 @@ function updateBalBarArrows() {
   balBarAtEnd.value = el.scrollLeft >= el.scrollWidth - el.clientWidth - 4
 }
 
-// ─── Fallback rates ────────────────────────────────────────────────────────────
+//  Fallback rates 
 const FALLBACK_USD_RATE = 0.001
 const FALLBACK_KHR_RATE = 4
 
-// ─── Computed: shared ──────────────────────────────────────────────────────────
+//  Computed: shared 
 const selectedExchangeRate = computed<number>(() => {
   if (currentCurrencyId.value !== null) {
     const r = exchangeRateByCurrencyId.value[currentCurrencyId.value]
@@ -641,7 +154,7 @@ const currentCurrencyBalance = computed(() => {
   return 0
 })
 
-// ─── Computed: B2C ────────────────────────────────────────────────────────────
+//  Computed: B2C 
 const isCustomMode = computed(() =>
   selectedPackage.value === null && (customAmount.value ?? 0) > 0,
 )
@@ -678,7 +191,7 @@ const b2cAfterCurrencyBalance = computed(() => {
   return formatCurrencyByCode(after, selectedCurrency.value)
 })
 
-// ─── Computed: C2B ────────────────────────────────────────────────────────────
+//  Computed: C2B 
 const c2bReceiveAmount = computed(() =>
   Math.max(0, c2bCoins.value) * selectedExchangeRate.value,
 )
@@ -695,7 +208,11 @@ const c2bErrorMsg = computed(() => {
   return ''
 })
 
-// ─── Computed: form validity ───────────────────────────────────────────────────
+const missingCoins = computed(() =>
+  Math.max(0, insufficientBetAmount.value - currentCoinBalance.value),
+)
+
+//  Computed: form validity 
 const isFormValid = computed(() => {
   if (activeTab.value === 'b2c') {
     return b2cFinalCoins.value >= 100 && canAffordFinal.value && b2cFinalCost.value > 0
@@ -703,7 +220,7 @@ const isFormValid = computed(() => {
   return c2bCoins.value >= 100 && !c2bErrorMsg.value
 })
 
-// ─── Computed: header ─────────────────────────────────────────────────────────
+//  Computed: header 
 const headerIcon = computed(() => {
   if (currentStep.value === 'confirm') return 'mdi-shield-check-outline'
   if (currentStep.value === 'success') return 'mdi-check-circle-outline'
@@ -727,7 +244,7 @@ const headerTitle = computed(() => {
   return activeTab.value === 'b2c' ? t('balance.topUpCoins') : t('balance.cashOutCoins')
 })
 
-// ─── Watchers ─────────────────────────────────────────────────────────────────
+//  Watchers 
 watch(() => props.modelValue, (val) => {
   if (val) {
     internalVisible.value = true
@@ -745,7 +262,7 @@ watch(walletBalances, () => {
   nextTick(() => updateBalBarArrows())
 }, { deep: true })
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+//  Helpers 
 function toNumber(v: unknown): number {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
@@ -799,7 +316,7 @@ function resetSelection() {
   c2bCoins.value = 0
 }
 
-// ─── API calls ─────────────────────────────────────────────────────────────────
+//  API calls 
 async function hydrateForms(targetCode?: CurrencyCode) {
   isLoadingForm.value = true
   try {
@@ -850,7 +367,7 @@ async function loadPackages(currencyId: number) {
   }
 }
 
-// ─── Dialog flow ───────────────────────────────────────────────────────────────
+//  Dialog flow 
 async function openDialog() {
   currentStep.value = 'form'
   resetSelection()
@@ -989,7 +506,7 @@ function close() {
   }, 300)
 }
 
-// ─── Formatters ────────────────────────────────────────────────────────────────
+//  Formatters 
 function formatCoins(n: number): string {
   return new Intl.NumberFormat('en-US').format(Math.floor(n))
 }
@@ -1010,12 +527,503 @@ function formatRateByCode(rate: number, code: CurrencyCode): string {
   return `${safe.toFixed(4)} ${code}`
 }
 
-// ─── Expose for parent use ─────────────────────────────────────────────────────
+//  Expose for parent use 
 defineExpose({ showInsufficientCoinsDialog })
 </script>
 
+
+<template>
+  <!--  Insufficient Coins Dialog  -->
+  <v-dialog v-model="insufficientCoinsVisible" max-width="360" persistent :scrim="true"
+    scrim-color="rgba(0,0,0,0.75)" transition="dialog-bottom-transition">
+    <v-card class="ocean-card insufficient-card" rounded="xl">
+      <div class="insufficient-body">
+        <!-- Animated coin icon -->
+        <div class="insufficient-icon-wrap">
+          <div class="insufficient-icon-ring" />
+          <v-icon color="#fac775" size="38">mdi-circle-multiple-outline</v-icon>
+        </div>
+
+        <div class="insufficient-title">{{ t('balance.notEnoughCoinsTitle') }}</div>
+        <div class="insufficient-desc">
+          {{ t('balance.notEnoughCoinsMessage') }}<br />
+          {{ t('balance.notEnoughCoinsSubmessage') }}
+        </div>
+
+        <!-- Coin status -->
+        <div class="insufficient-status-row">
+          <div class="insuf-stat">
+            <div class="insuf-stat-label">{{ t('balance.youHave') }}</div>
+            <div class="insuf-stat-value" style="color:#ffffff">{{ formatCoins(currentCoinBalance) }}</div>
+            <div class="insuf-stat-unit">{{ t('balance.coins') }}</div>
+          </div>
+          <div class="insuf-arrow">
+            <v-icon color="rgba(173,228,242,0.25)" size="18">mdi-arrow-right</v-icon>
+          </div>
+          <div class="insuf-stat">
+            <div class="insuf-stat-label">{{ t('balance.betRequires') }}</div>
+            <div class="insuf-stat-value" style="color:#ffffff">{{ formatCoins(insufficientBetAmount) }}</div>
+            <div class="insuf-stat-unit">{{ t('balance.coins') }}</div>
+          </div>
+        </div>
+
+        <div v-if="missingCoins > 0" class="insufficient-gap-pill">
+          <v-icon color="#fac775" size="16">mdi-plus-circle-outline</v-icon>
+          <span>{{ t('balance.needMoreCoins', { coins: formatCoins(missingCoins) }) }}</span>
+        </div>
+
+        <div class="insufficient-actions">
+          <v-btn variant="flat" class="ocean-btn-confirm insuf-exchange-btn" @click="openExchangeFromInsufficient">
+            <v-icon start size="15">mdi-swap-horizontal</v-icon>
+            {{ t('balance.exchangeCoinsNow') }}
+          </v-btn>
+          <v-btn variant="text" class="insuf-cancel-btn" @click="closeInsufficientDialog">
+            {{ t('common.cancel') }}
+          </v-btn>
+        </div>
+      </div>
+    </v-card>
+  </v-dialog>
+
+  <!--  Main Exchange Dialog  -->
+  <v-dialog v-model="internalVisible" max-width="500" persistent :scrim="true" scrim-color="rgba(0,0,0,0.75)"
+    transition="dialog-bottom-transition" :fullscreen="$vuetify.display.xs" @update:model-value="onDialogUpdate">
+    <v-card class="ocean-card" rounded="xl">
+
+      <!--  Header  -->
+      <v-card-title class="ocean-header d-flex align-center gap-3 pa-4">
+        <div class="header-icon" :class="headerIconClass">
+          <v-icon :color="headerIconColor" size="20">{{ headerIcon }}</v-icon>
+        </div>
+        <span class="text-subtitle-1 font-weight-medium text-white">{{ headerTitle }}</span>
+        <v-spacer />
+        <v-btn icon variant="text" size="small" @click="close">
+          <v-icon color="rgba(173,228,242,0.5)" size="18">mdi-close</v-icon>
+        </v-btn>
+      </v-card-title>
+
+      <v-divider color="rgba(58,168,232,0.15)" />
+
+      <!--  Tab bar (hidden on confirm/success steps)  -->
+      <div v-if="currentStep === 'form'" class="tab-bar">
+        <button class="exchange-tab" :class="{ 'tab-active-b2c': activeTab === 'b2c' }" @click="switchTab('b2c')">
+          <div class="tab-inner">
+            <div class="tab-icon-wrap tab-icon-b2c">
+              <v-icon size="14">mdi-wallet-outline</v-icon>
+            </div>
+            <div class="tab-text-wrap">
+              <span class="tab-label">{{ t('balance.topUpCoins') }}</span>
+              <!-- <span class="tab-desc">Balance → Coins</span> -->
+            </div>
+          </div>
+        </button>
+        <button class="exchange-tab" :class="{ 'tab-active-c2b': activeTab === 'c2b' }" @click="switchTab('c2b')">
+          <div class="tab-inner">
+            <div class="tab-icon-wrap tab-icon-c2b">
+              <v-icon size="14">mdi-circle-multiple-outline</v-icon>
+            </div>
+            <div class="tab-text-wrap">
+              <span class="tab-label">{{ t('balance.cashOut') }}</span>
+              <!-- <span class="tab-desc">Coins → Balance</span> -->
+            </div>
+          </div>
+        </button>
+      </div>
+
+      <!-- ══════════════════════════════════════════════════════════
+           FORM STEP
+      ══════════════════════════════════════════════════════════ -->
+      <template v-if="currentStep === 'form'">
+
+        <!--  B2C: Top Up Coins  -->
+        <div v-if="activeTab === 'b2c'" class="step-scroll-body">
+          <div class="pa-4">
+            <!-- Currency selector -->
+            <div class="slabel mb-2">{{ t('balance.payWith') }}</div>
+            <div class="bar-outer mb-3">
+              <button class="bar-arrow-btn" :class="{ hidden: balBarAtStart }" @click="scrollBalBar(-1)">
+                <v-icon size="13">mdi-chevron-left</v-icon>
+              </button>
+              <div class="bar-scroll-area">
+                <div ref="balBarRef" class="bar-scroll-track" @scroll="updateBalBarArrows">
+                  <template v-for="(bal, i) in walletBalances" :key="bal.currency_id">
+                    <div v-if="i > 0" class="bar-sep" />
+                    <button class="bar-bal-item"
+                      :class="{ 'bar-bal-item-active': selectedCurrency === bal.currency_code }"
+                      :disabled="isLoadingForm || isLoadingPackages" @click="onSelectCurrency(bal.currency_code)">
+                      <!-- <div class="bar-bal-code">{{ bal.currency_code }}</div> -->
+                      <div class="bar-bal-amount">{{ formatCurrencyByCode(toNumber(bal.amount), bal.currency_code) }}</div>
+                    </button>
+                  </template>
+                </div>
+              </div>
+              <button class="bar-arrow-btn" :class="{ hidden: balBarAtEnd }" @click="scrollBalBar(1)">
+                <v-icon size="13">mdi-chevron-right</v-icon>
+              </button>
+            </div>
+
+            <!-- Rate info -->
+            <div class="rate-bar mb-3">
+              <v-icon size="13" color="#5fd4b0" class="mr-1">mdi-information-outline</v-icon>
+              <span class="rate-text">
+                {{ t('balance.rate') }} <strong>{{ t('balance.oneCoin') }}</strong> = {{ ratePerCoinFormatted }}
+              </span>
+            </div>
+
+            <!-- Packages -->
+            <div class="slabel mb-2">{{ t('balance.selectPackage') }}</div>
+
+            <div v-if="isLoadingPackages" class="pkg-empty-state mb-2">{{ t('common.loading') }}</div>
+
+            <div v-else-if="packages.length" class="pkg-list mb-2">
+              <div v-for="pkg in packages" :key="pkg.id" class="pkg-card"
+                :class="{ 'pkg-selected': selectedPackage?.id === pkg.id && !isCustomMode }"
+                @click="selectPackage(pkg)">
+                <div class="pkg-icon-wrap">
+                  <v-icon color="#44d7c5" size="19">mdi-circle-multiple-outline</v-icon>
+                </div>
+                <div class="pkg-info">
+                  <div class="pkg-title">
+                    {{ formatCoins(pkg.coinAmount) }} {{ t('balance.coins') }}
+                  </div>
+                  <!-- <div class="pkg-subtitle">
+                    {{ pkg.name }}
+                    <template v-if="pkg.description">· {{ pkg.description }}</template>
+                  </div> -->
+                </div>
+                <div class="pkg-right">
+                  <div class="pkg-price">
+                    {{ formatCurrencyByCode(pkg.priceAmount, pkg.currencyCode) }}
+                  </div>
+                  <div class="pkg-price-sub">{{ pkg.currencyCode }}</div>
+                </div>
+                <div class="pkg-check">
+                  <div class="pkg-check-inner" />
+                </div>
+              </div>
+            </div>
+
+            <div v-else class="pkg-empty-state mb-2">
+              {{ t('balance.noPackagesAvailable') }}
+            </div>
+
+            <!-- OR divider -->
+            <div class="or-divider mb-3">
+              <div class="or-line" /><span class="or-text">{{ t('balance.orCustom') }}</span>
+              <div class="or-line" />
+            </div>
+
+            <!-- Custom amount -->
+            <div class="pkg-card custom-pkg-card mb-1" :class="{ 'pkg-selected': isCustomMode }">
+              <div class="pkg-icon-wrap">
+                <v-icon color="rgba(173,228,242,0.5)" size="17">mdi-pencil-outline</v-icon>
+              </div>
+              <div class="pkg-info">
+                <div class="custom-label mb-1">{{ t('balance.enterCoinAmount') }}</div>
+                <div class="custom-input-row">
+                  <input v-model.number="customAmount" type="number" class="custom-input"
+                    :placeholder="t('balance.customPlaceholder')" min="100" step="100" @input="onCustomInput" />
+                </div>
+                <div v-if="(customAmount ?? 0) > 0 && !canAffordCustom" class="custom-error mt-1">
+                  <v-icon size="11" color="#f09595">mdi-alert-circle-outline</v-icon>
+                  {{ t('balance.insufficientCurrency', { currency: selectedCurrency }) }}
+                </div>
+              </div>
+              <div class="pkg-right">
+                <div class="pkg-price" style="font-size:13px">{{ customCostFormatted }}</div>
+                <div class="pkg-price-sub">{{ t('balance.minCoins') }}</div>
+              </div>
+              <div class="pkg-check">
+                <div class="pkg-check-inner" />
+              </div>
+            </div>
+
+            <!-- Summary -->
+            <!-- <div v-if="b2cFinalCoins > 0 && canAffordFinal" class="summary-row mt-4">
+              <div>
+                <div class="summary-label">{{ t('balance.youWillReceive') }}</div>
+                <div class="summary-value">
+                  <v-icon size="13" color="#44d7c5">mdi-circle-multiple-outline</v-icon>
+                  {{ formatCoins(b2cFinalCoins) }} {{ t('balance.coins') }}
+                </div>
+              </div>
+              <v-icon color="rgba(173,228,242,0.3)" size="17">mdi-arrow-right</v-icon>
+              <div class="text-right">
+                <div class="summary-label">{{ t('balance.deductedFrom', { currency: selectedCurrency }) }}</div>
+                <div class="summary-value">{{ b2cFinalCostFormatted }}</div>
+              </div>
+            </div> -->
+
+            <!-- After balance preview -->
+            <!-- <div v-if="b2cFinalCoins > 0 && canAffordFinal" class="after-balance-row mt-2">
+              <div class="ab-item">
+                <div class="ab-label">{{ t('balance.coinsAfter') }}</div>
+                <div class="ab-value">{{ formatCoins(currentCoinBalance + b2cFinalCoins) }}</div>
+              </div>
+              <div class="ab-divider" />
+              <div class="ab-item">
+                <div class="ab-label">{{ t('balance.currencyAfter', { currency: selectedCurrency }) }}</div>
+                <div class="ab-value">{{ b2cAfterCurrencyBalance }}</div>
+              </div>
+            </div> -->
+
+            <!-- Warning -->
+            <!-- <div class="warn-box mt-3">
+              <v-icon size="13" color="#fac775" class="mt-1 flex-shrink-0">mdi-alert-triangle-outline</v-icon>
+              <span>{{ t('balance.warning', { currency: selectedCurrency }) }}</span>
+            </div> -->
+
+          </div>
+        </div>
+
+        <!--  C2B: Cash Out (Coins → Balance)  -->
+        <div v-else class="step-scroll-body">
+          <div class="pa-4">
+
+            <!-- Currency selector -->
+            <div class="slabel mb-2">{{ t('balance.receiveInto') }}</div>
+            <div class="bar-outer mb-3">
+              <button class="bar-arrow-btn" :class="{ hidden: balBarAtStart }" @click="scrollBalBar(-1)">
+                <v-icon size="13">mdi-chevron-left</v-icon>
+              </button>
+              <div class="bar-scroll-area">
+                <div ref="balBarRef" class="bar-scroll-track" @scroll="updateBalBarArrows">
+                  <template v-for="(bal, i) in walletBalances" :key="bal.currency_id">
+                    <div v-if="i > 0" class="bar-sep" />
+                    <button class="bar-bal-item"
+                      :class="{ 'bar-bal-item-active': selectedCurrency === bal.currency_code }"
+                      :disabled="isLoadingForm" @click="onSelectCurrency(bal.currency_code)">
+                      <div class="bar-bal-code">{{ bal.currency_code }}</div>
+                      <div class="bar-bal-amount">{{ formatCurrencyByCode(toNumber(bal.amount), bal.currency_code) }}</div>
+                    </button>
+                  </template>
+                </div>
+              </div>
+              <button class="bar-arrow-btn" :class="{ hidden: balBarAtEnd }" @click="scrollBalBar(1)">
+                <v-icon size="13">mdi-chevron-right</v-icon>
+              </button>
+            </div>
+
+            <!-- Rate info -->
+            <div class="rate-bar mb-3">
+              <v-icon size="13" color="#5fd4b0" class="mr-1">mdi-information-outline</v-icon>
+              <span class="rate-text">
+                {{ t('balance.rate') }} <strong>{{ t('balance.oneCoin') }}</strong> = {{ ratePerCoinFormatted }}
+              </span>
+            </div>
+
+            <!-- Coin balance badge -->
+            <div class="coin-balance-badge mb-3">
+              <v-icon color="#fac775" size="20" class="mr-2">mdi-circle-multiple-outline</v-icon>
+              <div>
+                <div class="balance-label">{{ t('balance.availableCoins') }}</div>
+                <div class="balance-value">{{ formatCoins(currentCoinBalance) }}</div>
+              </div>
+            </div>
+
+            <!-- Coin amount input -->
+            <div class="slabel mb-2">{{ t('balance.coinsToCashOut') }}</div>
+            <div class="inp-card mb-3" :class="{ 'inp-card-focus': c2bCoins > 0 }">
+              <div class="inp-row">
+                <input v-model.number="c2bCoins" type="number" class="big-input" placeholder="0" min="100" step="100"
+                  @input="onC2BInput" />
+                <span class="inp-unit">{{ t('balance.coins') }}</span>
+              </div>
+              <div class="inp-cost" :style="c2bCoins > 0 ? 'color:#ffffff' : 'color:rgba(255,255,255,0.3)'">
+                {{ c2bCoins > 0 ? '≈ ' + formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) : '—' }}
+              </div>
+              <div v-if="c2bErrorMsg" class="custom-error mt-1">
+                <v-icon size="11" color="#f09595">mdi-alert-circle-outline</v-icon>
+                {{ c2bErrorMsg }}
+              </div>
+            </div>
+
+            <!-- Summary -->
+            <div v-if="c2bCoins >= 100 && !c2bErrorMsg" class="summary-row mt-1">
+              <div>
+                <div class="summary-label">{{ t('balance.youSpend') }}</div>
+                <div class="summary-value">
+                  <v-icon size="13" color="#fac775">mdi-circle-multiple-outline</v-icon>
+                  {{ formatCoins(c2bCoins) }} {{ t('balance.coins') }}
+                </div>
+              </div>
+              <v-icon color="rgba(173,228,242,0.3)" size="17">mdi-arrow-right</v-icon>
+              <div class="text-right">
+                <div class="summary-label">{{ t('balance.youReceive') }}</div>
+                <div class="summary-value">
+                  {{ formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) }}
+                </div>
+              </div>
+            </div>
+
+            <div v-if="c2bCoins >= 100 && !c2bErrorMsg" class="after-balance-row mt-2">
+              <div class="ab-item">
+                <div class="ab-label">{{ t('balance.coinsAfter') }}</div>
+                <div class="ab-value">{{ formatCoins(Math.max(0, currentCoinBalance - c2bCoins)) }}</div>
+              </div>
+              <div class="ab-divider" />
+              <div class="ab-item">
+                <div class="ab-label">{{ t('balance.currencyAfter', { currency: selectedCurrency }) }}</div>
+                <div class="ab-value">{{ c2bAfterCurrencyBalance }}</div>
+              </div>
+            </div>
+
+            <!-- Warning -->
+            <!-- <div class="warn-box mt-3">
+              <v-icon size="13" color="#fac775" class="mt-1 flex-shrink-0">mdi-alert-triangle-outline</v-icon>
+              <span>{{ t('balance.c2bWarning') }}</span>
+            </div> -->
+
+          </div>
+        </div>
+
+      </template>
+
+      <!-- ══════════════════════════════════════════════════════════
+           CONFIRM STEP
+      ══════════════════════════════════════════════════════════ -->
+      <template v-else-if="currentStep === 'confirm'">
+        <div class="pa-4" style="display:flex;flex-direction:column;gap:14px">
+
+          <p class="ocean-subtitle">
+            <template v-if="activeTab === 'b2c'">
+              {{ t('balance.confirmMessage', {
+                amount: b2cFinalCostFormatted,
+                currency: selectedCurrency,
+                coins: formatCoins(b2cFinalCoins),
+              }) }}
+            </template>
+            <template v-else>
+              {{ t('balance.cashOutConfirmMessage', {
+                coins: formatCoins(c2bCoins),
+                amount: formatCurrencyByCode(c2bReceiveAmount, selectedCurrency),
+                currency: selectedCurrency,
+              }) }}
+            </template>
+          </p>
+
+          <!-- B2C confirm detail -->
+          <div v-if="activeTab === 'b2c'" class="confirm-detail-row">
+            <div class="detail-item">
+              <v-icon size="15" color="#fac775" class="mb-1">mdi-cash-minus</v-icon>
+              <div class="detail-label">{{ t('balance.deducted') }}</div>
+              <div class="detail-value">-{{ b2cFinalCostFormatted }}</div>
+              <div class="detail-sub">{{ t('balance.fromCurrency', { currency: selectedCurrency }) }}</div>
+            </div>
+            <div class="detail-divider" />
+            <div class="detail-item">
+              <v-icon size="15" color="#44d7c5" class="mb-1">mdi-circle-multiple-outline</v-icon>
+              <div class="detail-label">{{ t('balance.youReceive') }}</div>
+              <div class="detail-value">+{{ formatCoins(b2cFinalCoins) }}</div>
+              <div class="detail-sub">{{ t('balance.coins') }}</div>
+            </div>
+            <div class="detail-divider" />
+            <div class="detail-item">
+              <v-icon size="15" color="rgba(173,228,242,0.6)" class="mb-1">mdi-wallet-outline</v-icon>
+              <div class="detail-label">{{ t('balance.balanceAfter') }}</div>
+              <div class="detail-value" style="font-size:12px">{{ b2cAfterCurrencyBalance }}</div>
+              <div class="detail-sub">{{ t('balance.currencyLeft', { currency: selectedCurrency }) }}</div>
+            </div>
+          </div>
+
+          <!-- C2B confirm detail -->
+          <div v-else class="confirm-detail-row">
+            <div class="detail-item">
+              <v-icon size="15" color="#fac775" class="mb-1">mdi-circle-multiple-outline</v-icon>
+              <div class="detail-label">{{ t('balance.deducted') }}</div>
+              <div class="detail-value">-{{ formatCoins(c2bCoins) }}</div>
+              <div class="detail-sub">{{ t('balance.coins') }}</div>
+            </div>
+            <div class="detail-divider" />
+            <div class="detail-item">
+              <v-icon size="15" color="#44d7c5" class="mb-1">mdi-wallet-outline</v-icon>
+              <div class="detail-label">{{ t('balance.youReceive') }}</div>
+              <div class="detail-value">+{{ formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) }}</div>
+              <div class="detail-sub">{{ selectedCurrency }}</div>
+            </div>
+            <div class="detail-divider" />
+            <div class="detail-item">
+              <v-icon size="15" color="rgba(173,228,242,0.6)" class="mb-1">mdi-circle-multiple-outline</v-icon>
+              <div class="detail-label">{{ t('balance.coinsAfter') }}</div>
+              <div class="detail-value" style="font-size:12px">{{ formatCoins(Math.max(0, currentCoinBalance - c2bCoins)) }}</div>
+              <div class="detail-sub">{{ t('balance.remaining') }}</div>
+            </div>
+          </div>
+
+          <v-alert type="warning" variant="tonal" density="compact" border="start" color="amber">
+            <span style="font-size:12px">
+              <template v-if="activeTab === 'b2c'">
+                {{ t('balance.warning', { currency: selectedCurrency }) }}
+              </template>
+              <template v-else>
+                {{ t('balance.c2bConfirmWarning') }}
+              </template>
+            </span>
+          </v-alert>
+
+        </div>
+      </template>
+
+      <!-- ══════════════════════════════════════════════════════════
+           SUCCESS STEP
+      ══════════════════════════════════════════════════════════ -->
+      <template v-else-if="currentStep === 'success'">
+        <div class="success-body">
+          <v-icon color="#44d7c5" size="52">mdi-check-circle-outline</v-icon>
+          <div class="success-title">{{ t('balance.exchangeSuccessfulTitle') }}</div>
+          <div class="success-pill">
+            <template v-if="activeTab === 'b2c'">+{{ formatCoins(b2cFinalCoins) }} {{ t('balance.coins') }}</template>
+            <template v-else>+{{ formatCurrencyByCode(c2bReceiveAmount, selectedCurrency) }}</template>
+          </div>
+          <div class="success-sub">
+            <template v-if="activeTab === 'b2c'">−{{ b2cFinalCostFormatted }} {{ t('balance.deductedFrom', { currency: selectedCurrency }) }}</template>
+            <template v-else>−{{ formatCoins(c2bCoins) }} {{ t('balance.coinsDeducted') }}</template>
+          </div>
+          <v-btn variant="flat" class="ocean-btn-confirm mt-4" style="width:160px" @click="close">
+            <v-icon start size="15">mdi-check</v-icon> {{ t('common.done') }}
+          </v-btn>
+        </div>
+      </template>
+
+      <v-divider v-if="currentStep !== 'success'" color="rgba(58,168,232,0.1)" />
+
+      <!--  Footer buttons  -->
+      <v-card-actions v-if="currentStep !== 'success'" class="px-4 py-3 gap-3">
+
+        <!-- Form step -->
+        <template v-if="currentStep === 'form'">
+          <v-btn variant="outlined" color="rgba(173,228,242,0.4)" class="ocean-btn-cancel flex-grow-1" @click="close">
+            {{ t('common.cancel') }}
+          </v-btn>
+          <v-btn variant="flat" class="ocean-btn-confirm flex-grow-1"
+            :disabled="!isFormValid || isLoadingForm || isLoadingPackages" @click="goToConfirm">
+            {{ t('common.confirm') }}
+            <v-icon end size="15">mdi-arrow-right</v-icon>
+          </v-btn>
+        </template>
+
+        <!-- Confirm step -->
+        <template v-else-if="currentStep === 'confirm'">
+          <v-btn variant="outlined" color="rgba(173,228,242,0.4)" class="ocean-btn-cancel flex-grow-1" @click="backToForm">
+            <v-icon start size="15">mdi-arrow-left</v-icon>
+            {{ t('common.back') }}
+          </v-btn>
+          <v-btn variant="flat" class="ocean-btn-danger flex-grow-1" :loading="purchasing" @click="confirmExchange">
+            <v-icon start size="15">mdi-check-circle-outline</v-icon>
+            {{ t('balance.confirmExchange') }}
+          </v-btn>
+        </template>
+
+      </v-card-actions>
+
+    </v-card>
+  </v-dialog>
+</template>
+
+
+
 <style scoped>
-/* ── Card shell ──────────────────────────────────────────────────────────────── */
+/*  Card shell  */
 .ocean-card {
   background: linear-gradient(180deg, #0a1929 0%, #051928 55%, #0a2240 100%) !important;
   border: 1.5px solid rgba(26, 111, 168, 0.5) !important;
@@ -1028,7 +1036,7 @@ defineExpose({ showInsufficientCoinsDialog })
   background: linear-gradient(90deg, rgba(26, 111, 168, 0.22), transparent);
 }
 
-/* ── Header icon variants ────────────────────────────────────────────────────── */
+/*  Header icon variants  */
 .header-icon {
   width: 34px;
   height: 34px;
@@ -1056,11 +1064,11 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .ocean-subtitle {
   font-size: 13px;
-  color: rgba(173, 228, 242, 0.72);
+  color: rgba(255, 255, 255, 0.72);
   line-height: 1.6;
 }
 
-/* ── Tab bar ─────────────────────────────────────────────────────────────────── */
+/*  Tab bar  */
 .tab-bar {
   display: flex;
   background: rgba(5, 15, 30, 0.6);
@@ -1072,7 +1080,7 @@ defineExpose({ showInsufficientCoinsDialog })
   padding: 10px 8px;
   border: none;
   background: transparent;
-  color: rgba(173, 228, 242, 0.4);
+  color: rgba(255, 255, 255, 0.4);
   cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: all 0.2s;
@@ -1123,13 +1131,13 @@ defineExpose({ showInsufficientCoinsDialog })
   font-size: 13px;
   font-weight: 600;
   line-height: 1.2;
-  color: rgba(173, 228, 242, 0.45);
+  color: rgba(255, 255, 255, 0.45);
   transition: color 0.2s;
 }
 
 .tab-desc {
   font-size: 10px;
-  color: rgba(173, 228, 242, 0.28);
+  color: rgba(255, 255, 255, 0.28);
   letter-spacing: 0.04em;
   transition: color 0.2s;
 }
@@ -1141,11 +1149,11 @@ defineExpose({ showInsufficientCoinsDialog })
 }
 
 .tab-active-b2c .tab-label {
-  color: #44d7c5;
+  color: #ffffff;
 }
 
 .tab-active-b2c .tab-desc {
-  color: rgba(68, 215, 197, 0.55);
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .tab-active-b2c .tab-icon-b2c {
@@ -1161,11 +1169,11 @@ defineExpose({ showInsufficientCoinsDialog })
 }
 
 .tab-active-c2b .tab-label {
-  color: #fac775;
+  color: #ffffff;
 }
 
 .tab-active-c2b .tab-desc {
-  color: rgba(250, 199, 117, 0.55);
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .tab-active-c2b .tab-icon-c2b {
@@ -1174,7 +1182,7 @@ defineExpose({ showInsufficientCoinsDialog })
   color: #fac775;
 }
 
-/* ── Scrollable body ─────────────────────────────────────────────────────────── */
+/*  Scrollable body  */
 .step-scroll-body {
   flex: 1;
   overflow-y: auto;
@@ -1193,15 +1201,15 @@ defineExpose({ showInsufficientCoinsDialog })
   border-radius: 3px;
 }
 
-/* ── Section label ───────────────────────────────────────────────────────────── */
+/*  Section label  */
 .slabel {
-  font-size: 10px;
-  color: rgba(173, 228, 242, 0.4);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 16px;
+  color: white;
+  /* letter-spacing: 0.08em; */
+  text-transform: capitalize;
 }
 
-/* ── Balance bar ─────────────────────────────────────────────────────────────── */
+/*  Balance bar  */
 .bar-outer {
   display: flex;
   align-items: center;
@@ -1255,22 +1263,22 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .bar-bal-code {
   font-size: 10px;
-  color: rgba(95, 212, 176, 0.55);
+  color: rgba(255, 255, 255, 0.55);
   letter-spacing: 0.07em;
   line-height: 1;
   margin-bottom: 1px;
 }
 
-.bar-bal-item-active .bar-bal-code { color: rgba(173, 228, 242, 0.78); }
+.bar-bal-item-active .bar-bal-code { color: #ffffff; }
 
 .bar-bal-amount {
   font-size: 13px;
   font-weight: 600;
-  color: #5fd4b0;
+  color: rgba(255, 255, 255, 0.85);
   line-height: 1.3;
 }
 
-.bar-bal-item-active .bar-bal-amount { color: #9ff6dd; }
+.bar-bal-item-active .bar-bal-amount { color: #ffffff; }
 
 .bar-sep {
   width: 1px;
@@ -1287,7 +1295,7 @@ defineExpose({ showInsufficientCoinsDialog })
   border-radius: 7px;
   border: 1px solid rgba(29, 158, 117, 0.22);
   background: transparent;
-  color: rgba(95, 212, 176, 0.65);
+  color: rgba(255, 255, 255, 0.65);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1298,7 +1306,7 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .bar-arrow-btn:hover {
   background: rgba(29, 158, 117, 0.12);
-  color: #5fd4b0;
+  color: #ffffff;
 }
 
 .bar-arrow-btn.hidden {
@@ -1309,7 +1317,7 @@ defineExpose({ showInsufficientCoinsDialog })
   border-width: 0;
 }
 
-/* ── Rate bar ────────────────────────────────────────────────────────────────── */
+/*  Rate bar  */
 .rate-bar {
   display: flex;
   align-items: center;
@@ -1321,12 +1329,12 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .rate-text {
   font-size: 12px;
-  color: rgba(95, 212, 176, 0.8);
+  color: rgba(255, 255, 255, 0.8);
 }
 
-.rate-text strong { color: #5fd4b0; }
+.rate-text strong { color: #ffffff; }
 
-/* ── Coin balance badge ───────────────────────────────────────────────────────── */
+/*  Coin balance badge  */
 .coin-balance-badge {
   display: flex;
   align-items: center;
@@ -1338,17 +1346,17 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .balance-label {
   font-size: 11px;
-  color: rgba(250, 199, 117, 0.75);
+  color: rgba(255, 255, 255, 0.75);
   letter-spacing: 0.04em;
 }
 
 .balance-value {
   font-size: 20px;
   font-weight: 600;
-  color: #fac775;
+  color: #ffffff;
 }
 
-/* ── Input card ──────────────────────────────────────────────────────────────── */
+/*  Input card  */
 .inp-card {
   background: rgba(5, 20, 38, 0.8);
   border: 1.5px solid rgba(58, 168, 232, 0.18);
@@ -1372,8 +1380,8 @@ defineExpose({ showInsufficientCoinsDialog })
   outline: none;
   font-size: 26px;
   font-weight: 600;
-  color: #edf9ff;
-  caret-color: #44d7c5;
+  color: #ffffff;
+  caret-color: #ffffff;
   -moz-appearance: textfield;
   appearance: textfield;
 }
@@ -1381,11 +1389,11 @@ defineExpose({ showInsufficientCoinsDialog })
 .big-input::-webkit-outer-spin-button,
 .big-input::-webkit-inner-spin-button { -webkit-appearance: none; }
 
-.big-input::placeholder { color: rgba(173, 228, 242, 0.18); }
+.big-input::placeholder { color: rgba(255, 255, 255, 0.18); }
 
 .inp-unit {
   font-size: 12px;
-  color: rgba(173, 228, 242, 0.35);
+  color: rgba(255, 255, 255, 0.35);
   flex-shrink: 0;
 }
 
@@ -1396,7 +1404,7 @@ defineExpose({ showInsufficientCoinsDialog })
   margin-top: 3px;
 }
 
-/* ── Packages ────────────────────────────────────────────────────────────────── */
+/*  Packages  */
 .pkg-list {
   display: flex;
   flex-direction: column;
@@ -1408,7 +1416,7 @@ defineExpose({ showInsufficientCoinsDialog })
   border-radius: 11px;
   padding: 10px 13px;
   font-size: 12px;
-  color: rgba(173, 228, 242, 0.5);
+  color: rgba(255, 255, 255, 0.5);
   text-align: center;
   background: rgba(5, 20, 38, 0.45);
 }
@@ -1452,17 +1460,6 @@ defineExpose({ showInsufficientCoinsDialog })
   background: linear-gradient(180deg, #44d7c5, #378add) !important;
 }
 
-.pkg-popular { border-color: rgba(250, 199, 117, 0.32); }
-
-.pkg-popular.pkg-selected {
-  border-color: rgba(250, 199, 117, 0.7) !important;
-  background: rgba(30, 20, 5, 0.85) !important;
-}
-
-.pkg-popular.pkg-selected::before {
-  background: linear-gradient(180deg, #fac775, #ba7517) !important;
-}
-
 .pkg-icon-wrap {
   width: 36px;
   height: 36px;
@@ -1481,17 +1478,12 @@ defineExpose({ showInsufficientCoinsDialog })
   border-color: rgba(68, 215, 197, 0.3);
 }
 
-.pkg-popular .pkg-icon-wrap {
-  background: rgba(186, 117, 23, 0.14);
-  border-color: rgba(250, 199, 117, 0.28);
-}
-
 .pkg-info { flex: 1; min-width: 0; }
 
 .pkg-title {
   font-size: 13px;
   font-weight: 600;
-  color: #edf9ff;
+  color: #ffffff;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1500,19 +1492,8 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .pkg-subtitle {
   font-size: 11px;
-  color: rgba(173, 228, 242, 0.5);
+  color: rgba(255, 255, 255, 0.5);
   margin-top: 2px;
-}
-
-.pkg-popular-tag {
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  background: rgba(186, 117, 23, 0.2);
-  border: 1px solid rgba(250, 199, 117, 0.32);
-  color: #fac775;
-  padding: 1px 6px;
-  border-radius: 4px;
 }
 
 .pkg-right { text-align: right; flex-shrink: 0; }
@@ -1520,12 +1501,12 @@ defineExpose({ showInsufficientCoinsDialog })
 .pkg-price {
   font-size: 13px;
   font-weight: 600;
-  color: #5fd4b0;
+  color: #ffffff;
 }
 
 .pkg-price-sub {
   font-size: 10px;
-  color: rgba(95, 212, 176, 0.45);
+  color: rgba(255, 255, 255, 0.45);
   margin-top: 1px;
 }
 
@@ -1547,10 +1528,6 @@ defineExpose({ showInsufficientCoinsDialog })
   border-color: transparent;
 }
 
-.pkg-popular.pkg-selected .pkg-check {
-  background: linear-gradient(135deg, #fac775, #ba7517);
-}
-
 .pkg-check-inner {
   width: 5px;
   height: 5px;
@@ -1563,12 +1540,12 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .pkg-selected .pkg-check-inner { opacity: 1; transform: scale(1); }
 
-/* ── Custom amount ───────────────────────────────────────────────────────────── */
+/*  Custom amount  */
 .custom-pkg-card { cursor: default; }
 
 .custom-label {
   font-size: 10px;
-  color: rgba(173, 228, 242, 0.45);
+  color: rgba(255, 255, 255, 0.45);
   letter-spacing: 0.05em;
 }
 
@@ -1584,9 +1561,9 @@ defineExpose({ showInsufficientCoinsDialog })
   outline: none;
   font-size: 18px;
   font-weight: 600;
-  color: #edf9ff;
+  color: #ffffff;
   width: 100%;
-  caret-color: #44d7c5;
+  caret-color: #ffffff;
   -moz-appearance: textfield;
   appearance: textfield;
 }
@@ -1594,23 +1571,23 @@ defineExpose({ showInsufficientCoinsDialog })
 .custom-input::-webkit-outer-spin-button,
 .custom-input::-webkit-inner-spin-button { -webkit-appearance: none; }
 
-.custom-input::placeholder { color: rgba(173, 228, 242, 0.18); }
+.custom-input::placeholder { color: rgba(255, 255, 255, 0.18); }
 
 .custom-unit {
   font-size: 11px;
-  color: rgba(173, 228, 242, 0.38);
+  color: rgba(255, 255, 255, 0.38);
   white-space: nowrap;
 }
 
 .custom-error {
   font-size: 11px;
-  color: rgba(240, 149, 149, 0.9);
+  color: #ffffff;
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-/* ── OR divider ──────────────────────────────────────────────────────────────── */
+/*  OR divider  */
 .or-divider {
   display: flex;
   align-items: center;
@@ -1625,12 +1602,12 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .or-text {
   font-size: 10px;
-  color: rgba(173, 228, 242, 0.28);
+  color: rgba(255, 255, 255, 0.28);
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
-/* ── Summary ─────────────────────────────────────────────────────────────────── */
+/*  Summary  */
 .summary-row {
   background: rgba(26, 111, 168, 0.1);
   border: 1px solid rgba(26, 111, 168, 0.22);
@@ -1643,14 +1620,14 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .summary-label {
   font-size: 11px;
-  color: rgba(173, 228, 242, 0.62);
+  color: rgba(255, 255, 255, 0.62);
   margin-bottom: 2px;
 }
 
 .summary-value {
   font-size: 14px;
   font-weight: 600;
-  color: #edf9ff;
+  color: #ffffff;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1670,27 +1647,27 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .ab-label {
   font-size: 10px;
-  color: rgba(173, 228, 242, 0.45);
+  color: rgba(255, 255, 255, 0.45);
   letter-spacing: 0.05em;
   margin-bottom: 2px;
 }
 
-.ab-value { font-size: 13px; font-weight: 600; }
+.ab-value { font-size: 13px; font-weight: 600; color: #ffffff; }
 
-/* ── Warning box ─────────────────────────────────────────────────────────────── */
+/*  Warning box  */
 .warn-box {
   background: rgba(186, 117, 23, 0.1);
   border: 1px solid rgba(250, 199, 117, 0.25);
   border-radius: 9px;
   padding: 8px 11px;
   font-size: 11px;
-  color: rgba(250, 199, 117, 0.8);
+  color: rgba(255, 255, 255, 0.8);
   display: flex;
   align-items: flex-start;
   gap: 6px;
 }
 
-/* ── Confirm detail ──────────────────────────────────────────────────────────── */
+/*  Confirm detail  */
 .confirm-detail-row {
   display: flex;
   background: rgba(26, 111, 168, 0.1);
@@ -1712,19 +1689,19 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .detail-label {
   font-size: 10px;
-  color: rgba(173, 228, 242, 0.62);
+  color: rgba(255, 255, 255, 0.62);
   margin-bottom: 3px;
 }
 
-.detail-value { font-size: 14px; font-weight: 600; color: #edf9ff; }
+.detail-value { font-size: 14px; font-weight: 600; color: #ffffff; }
 
 .detail-sub {
   font-size: 10px;
-  color: rgba(173, 228, 242, 0.4);
+  color: rgba(255, 255, 255, 0.4);
   margin-top: 1px;
 }
 
-/* ── Success ─────────────────────────────────────────────────────────────────── */
+/*  Success  */
 .success-body {
   padding: 28px 18px;
   display: flex;
@@ -1734,7 +1711,7 @@ defineExpose({ showInsufficientCoinsDialog })
   text-align: center;
 }
 
-.success-title { font-size: 17px; font-weight: 600; color: #edf9ff; }
+.success-title { font-size: 17px; font-weight: 600; color: #ffffff; }
 
 .success-pill {
   background: rgba(68, 215, 197, 0.12);
@@ -1743,14 +1720,14 @@ defineExpose({ showInsufficientCoinsDialog })
   padding: 5px 18px;
   font-size: 13px;
   font-weight: 600;
-  color: #44d7c5;
+  color: #ffffff;
 }
 
-.success-sub { font-size: 13px; color: rgba(173, 228, 242, 0.65); }
+.success-sub { font-size: 13px; color: rgba(255, 255, 255, 0.65); }
 
-/* ── Buttons ─────────────────────────────────────────────────────────────────── */
+/*  Buttons  */
 .ocean-btn-cancel {
-  color: rgba(173, 228, 242, 0.65) !important;
+  color: rgba(255, 255, 255, 0.75) !important;
   border-color: rgba(173, 228, 242, 0.22) !important;
   text-transform: none;
   letter-spacing: 0.02em;
@@ -1758,7 +1735,7 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .ocean-btn-confirm {
   background: linear-gradient(135deg, #44d7c5, #378add) !important;
-  color: #051928 !important;
+  color: #ffffff !important;
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0.02em;
@@ -1772,7 +1749,7 @@ defineExpose({ showInsufficientCoinsDialog })
   letter-spacing: 0.02em;
 }
 
-/* ── Insufficient coins dialog ───────────────────────────────────────────────── */
+/*  Insufficient coins dialog  */
 .insufficient-card {
   border-color: rgba(240, 149, 149, 0.35) !important;
 }
@@ -1812,13 +1789,13 @@ defineExpose({ showInsufficientCoinsDialog })
 .insufficient-title {
   font-size: 18px;
   font-weight: 700;
-  color: #edf9ff;
+  color: #ffffff;
   letter-spacing: -0.01em;
 }
 
 .insufficient-desc {
   font-size: 13px;
-  color: rgba(173, 228, 242, 0.62);
+  color: rgba(255, 255, 255, 0.62);
   line-height: 1.6;
   max-width: 280px;
 }
@@ -1835,6 +1812,21 @@ defineExpose({ showInsufficientCoinsDialog })
   justify-content: center;
 }
 
+.insufficient-gap-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(250, 199, 117, 0.14), rgba(68, 215, 197, 0.09));
+  border: 1px solid rgba(250, 199, 117, 0.28);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .insuf-stat {
   display: flex;
   flex-direction: column;
@@ -1845,7 +1837,7 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .insuf-stat-label {
   font-size: 10px;
-  color: rgba(173, 228, 242, 0.42);
+  color: rgba(255, 255, 255, 0.42);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -1858,7 +1850,7 @@ defineExpose({ showInsufficientCoinsDialog })
 
 .insuf-stat-unit {
   font-size: 10px;
-  color: rgba(173, 228, 242, 0.35);
+  color: rgba(255, 255, 255, 0.35);
 }
 
 .insuf-arrow { flex-shrink: 0; }
@@ -1878,13 +1870,46 @@ defineExpose({ showInsufficientCoinsDialog })
 }
 
 .insuf-cancel-btn {
-  color: rgba(173, 228, 242, 0.4) !important;
+  color: rgba(255, 255, 255, 0.4) !important;
   font-size: 12px !important;
   text-transform: none;
   letter-spacing: 0.02em;
 }
 
-/* ── Fullscreen ──────────────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .insufficient-body {
+    padding: 20px 16px 16px;
+    gap: 10px;
+  }
+
+  .insufficient-title {
+    font-size: 17px;
+  }
+
+  .insufficient-desc {
+    font-size: 12px;
+  }
+
+  .insufficient-status-row {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .insuf-stat {
+    min-width: 72px;
+  }
+
+  .insuf-stat-value {
+    font-size: 18px;
+  }
+
+  .insuf-exchange-btn,
+  .insuf-cancel-btn {
+    min-height: 46px !important;
+  }
+}
+
+/*  Fullscreen  */
 :deep(.v-dialog--fullscreen) .ocean-card {
   border-radius: 0 !important;
   border: none !important;

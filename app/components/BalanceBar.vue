@@ -229,4 +229,30 @@ function toNumber(v: unknown): number {
 }
 .wallet-btn:hover { background: rgba(68, 215, 197, 0.2); }
 .wallet-btn:active { background: rgba(68, 215, 197, 0.28); }
+
+@media (max-width: 768px) {
+  .bar-outer {
+    padding: 6px;
+    gap: 6px;
+  }
+
+  .bal-item {
+    padding: 8px 12px;
+  }
+
+  .arrow-btn,
+  .wallet-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .bal-code {
+    font-size: 11px;
+  }
+
+  .bal-amount {
+    font-size: 14px;
+  }
+}
 </style>

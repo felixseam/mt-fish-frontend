@@ -33,72 +33,18 @@
           </div>
         </div>
 
-        <v-table class="report-table" fixed-header height="calc(100vh - 220px)">
-          <thead>
-            <tr>
-              <th>លេខ</th>
-              <th>ប្រតិបត្តិការអាយឌី</th>
-              <th>លេខសម្គាល់កាក់</th>
-              <th>Reference</th>
-              <th>Remark</th>
-              <th>ប្រភេទ</th>
-              <th>Amount</th>
-              <th>Before</th>
-              <th>After</th>
-              <th>Time</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            <tr v-if="isLoading">
-              <td colspan="10" class="empty">កំពុងទាញយកទិន្នន័យ...</td>
-            </tr>
-
-            <tr v-else-if="errorMessage">
-              <td colspan="10" class="empty">{{ errorMessage }}</td>
-            </tr>
-
-            <template v-else>
-              <tr v-for="(item, index) in transactions" :key="item.id">
-                <td>{{ getRowNo(index) }}</td>
-                <td>{{ item.id }}</td>
-                <td>{{ item.member_coin_id }}</td>
-                <td>{{ item.reference }}</td>
-                <td>{{ item.remark }}</td>
-                <td>{{ formatTransactionType(item) }}</td>
-                <td :class="parseAmount(item.amount) >= 0 ? 'positive' : 'negative'">
-                  {{ formatAmount(parseAmount(item.amount)) }}
-                </td>
-                <td>{{ formatAmount(parseAmount(item.before_coin)) }}</td>
-                <td>{{ formatAmount(parseAmount(item.after_coin)) }}</td>
-                <td>{{ formatDateTime(item.created_at) }}</td>
-              </tr>
-
-              <tr v-if="transactions.length > 0" class="summary-row">
-                <td colspan="6" class="summary-label">សរុបក្នុងមួយទំព័រ</td>
-                <td :class="pageAmountTotal >= 0 ? 'positive' : 'negative'">
-                  {{ formatAmount(pageAmountTotal) }}
-                </td>
-                <td colspan="2">{{ transactions.length }} records</td>
-                <td></td>
-              </tr>
-
-              <tr v-if="transactions.length === 0">
-                <td colspan="10" class="empty">គ្មានទិន្នន័យ</td>
-              </tr>
-            </template>
-          </tbody>
-        </v-table>
-
-        <div class="pagination">
-          <v-pagination
-            v-model="currentPage"
-            :length="totalPages"
-            :total-visible="5"
-            density="compact"
-            rounded="circle"
-          />
-        </div>
+        <AppTable
+          :columns="columns"
+          :items="transactions"
+          :loading="isLoading"
+          :error="errorMessage"
+          height="calc(100vh - 220px)"
+          :page="currentPage"
+          :page-size="itemsPerPage"
+          :total-pages="totalPages"
+          :subtotals="pageSubtotals"
+          @update:page="currentPage = $event"
+        />
       </v-card-text>
     </v-card>
   </v-bottom-sheet>
@@ -107,6 +53,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { getTransactions, type TransactionItem } from '~/composables/service/transactionApi'
+import AppTable, { type TableColumn, type TotalRow } from '~/components/common/AppTable.vue'
 
 const showSheet = ref(false)
 const filterDate = ref(formatDateForInput(new Date()))
@@ -117,10 +64,68 @@ const transactions = ref<TransactionItem[]>([])
 const isLoading = ref(false)
 const errorMessage = ref('')
 
+// ── Columns ──────────────────────────────────────────────────────────────────
+
+const columns: TableColumn<TransactionItem>[] = [
+  { key: 'index', label: 'លេខ', type: 'index' },
+  { key: 'id', label: 'ប្រតិបត្តិការអាយឌី' },
+  { key: 'member_coin_id', label: 'លេខសម្គាល់កាក់' },
+  { key: 'reference', label: 'Reference' },
+  { key: 'remark', label: 'Remark' },
+  {
+    key: 'transaction_type',
+    label: 'ប្រភេទ',
+    format: (_v, item) => formatTransactionType(item),
+  },
+  {
+    key: 'amount',
+    label: 'Amount',
+    format: (_v, item) => formatAmount(parseAmount(item.amount)),
+    cellClass: (item) => (parseAmount(item.amount) >= 0 ? 'positive' : 'negative'),
+  },
+  {
+    key: 'before_coin',
+    label: 'Before',
+    format: (_v, item) => formatAmount(parseAmount(item.before_coin)),
+  },
+  {
+    key: 'after_coin',
+    label: 'After',
+    format: (_v, item) => formatAmount(parseAmount(item.after_coin)),
+  },
+  {
+    key: 'created_at',
+    label: 'Time',
+    format: (_v, item) => formatDateTime(item.created_at),
+  },
+]
+
+// ── Computed ─────────────────────────────────────────────────────────────────
+
 const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / itemsPerPage)))
 const pageAmountTotal = computed(() =>
   transactions.value.reduce((sum, item) => sum + parseAmount(item.amount), 0),
 )
+
+const pageSubtotals = computed<TotalRow | undefined>(() => {
+  if (!transactions.value.length) return undefined
+  return {
+    labelSpan: 6,
+    pageLabel: 'សរុបក្នុងមួយទំព័រ',
+    cols: [
+      {
+        key: 'amount',
+        value: formatAmount(pageAmountTotal.value),
+        class: pageAmountTotal.value >= 0 ? 'positive' : 'negative',
+      },
+      { key: 'before_coin', value: `${transactions.value.length} records` },
+      { key: 'after_coin', value: '' },
+      { key: 'created_at', value: '' },
+    ],
+  }
+})
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function parseAmount(value: string | undefined | null): number {
   return Number.parseFloat(value ?? '0') || 0
@@ -159,9 +164,7 @@ function formatTransactionType(item: TransactionItem): string {
   return item.transaction_type || `Type ${item.transaction_type_id}`
 }
 
-function getRowNo(index: number): number {
-  return (currentPage.value - 1) * itemsPerPage + index + 1
-}
+// ── Data fetching ─────────────────────────────────────────────────────────────
 
 async function fetchTransactions() {
   isLoading.value = true
@@ -182,6 +185,8 @@ async function fetchTransactions() {
     isLoading.value = false
   }
 }
+
+// ── Event handlers ────────────────────────────────────────────────────────────
 
 function handleDateChange() {
   if (currentPage.value !== 1) {
@@ -209,6 +214,8 @@ async function open() {
   showSheet.value = true
   await fetchTransactions()
 }
+
+// ── Watchers ──────────────────────────────────────────────────────────────────
 
 watch(currentPage, () => {
   fetchTransactions()
@@ -280,99 +287,5 @@ defineExpose({ open })
 .ocean-input :deep(input),
 .ocean-input :deep(.v-select__selection-text) {
   color: rgb(var(--v-theme-on-surface)) !important;
-}
-
-.report-table {
-  background: transparent !important;
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.report-table :deep(table) {
-  border-collapse: collapse;
-  width: 100%;
-}
-
-.report-table :deep(thead th) {
-  background: rgb(var(--v-theme-primary)) !important;
-  color: rgb(var(--v-theme-on-primary)) !important;
-  font-weight: 700 !important;
-  font-size: 15px !important;
-  text-align: center !important;
-  border: 1.5px solid rgb(var(--v-theme-secondary)) !important;
-  white-space: nowrap;
-}
-
-.report-table :deep(tbody td) {
-  background: rgb(var(--v-theme-surface)) !important;
-  color: rgb(var(--v-theme-on-surface)) !important;
-  border: 1px solid rgb(var(--v-theme-secondary)) !important;
-  text-align: center !important;
-  font-size: 14px;
-}
-
-.report-table :deep(tbody tr:nth-child(even) td) {
-  background: rgba(var(--v-theme-primary), 0.06) !important;
-}
-
-.report-table :deep(tbody tr:hover td) {
-  background: rgba(var(--v-theme-primary), 0.14) !important;
-  transition: background 0.2s ease;
-}
-
-.report-table :deep(tbody tr.summary-row td) {
-  background: rgba(var(--v-theme-primary), 0.10) !important;
-  font-weight: 700 !important;
-  font-size: 14px !important;
-}
-
-.report-table :deep(tbody tr.summary-row td.summary-label) {
-  text-align: right !important;
-  color: rgb(var(--v-theme-primary)) !important;
-  padding-right: 12px !important;
-}
-
-.report-table :deep(tbody td.positive) {
-  color: rgb(var(--v-theme-success)) !important;
-  font-weight: 700 !important;
-}
-
-.report-table :deep(tbody td.negative) {
-  color: rgb(var(--v-theme-warning)) !important;
-  font-weight: 700 !important;
-}
-
-.empty {
-  padding: 20px;
-  color: rgb(var(--v-theme-primary));
-  text-align: center;
-  background: rgb(var(--v-theme-background)) !important;
-}
-
-.pagination {
-  display: flex;
-  justify-content: center;
-  margin-top: 15px;
-}
-
-.pagination :deep(.v-pagination__item button),
-.pagination :deep(.v-pagination__prev button),
-.pagination :deep(.v-pagination__next button) {
-  background: rgb(var(--v-theme-surface)) !important;
-  color: rgb(var(--v-theme-primary)) !important;
-  border: 1px solid rgb(var(--v-theme-secondary)) !important;
-}
-
-.pagination :deep(.v-pagination__item--is-active button) {
-  background: rgb(var(--v-theme-primary)) !important;
-  color: rgb(var(--v-theme-on-primary)) !important;
-  border-color: rgb(var(--v-theme-secondary)) !important;
-}
-
-.pagination :deep(.v-pagination__item button:hover),
-.pagination :deep(.v-pagination__prev button:hover),
-.pagination :deep(.v-pagination__next button:hover) {
-  background: rgba(var(--v-theme-primary), 0.14) !important;
-  color: rgb(var(--v-theme-primary)) !important;
 }
 </style>

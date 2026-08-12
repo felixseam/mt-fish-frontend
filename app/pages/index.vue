@@ -1,6 +1,6 @@
 <template>
   <div ref="pixiMountRef" class="game-container" />
-  <GameResumeDialog v-model="isGamePausedDialogOpen" @resume="handleResume" />
+  <!-- <GameResumeDialog v-model="isGamePausedDialogOpen" @resume="handleResume" /> -->
 
   <GameSessionExpiredDialog v-model="isSessionExpiredDialogOpen" :countdown-seconds="10"
     :auto-countdown="sessionExpiredAutoCountdown" @refresh="handleSessionExpiredRefresh" />
@@ -49,7 +49,7 @@ const isNotificationDialogOpen = ref(false)
 const isInsufficientBalanceDialogOpen = ref(false)
 const isGameSettingsDialogOpen = ref(false)
 const isLogoutDialogOpen = ref(false)
-const isGamePausedDialogOpen = ref(false)
+// const isGamePausedDialogOpen = ref(false)
 const isSessionExpiredDialogOpen = ref(false)
 const sessionExpiredAutoCountdown = ref(false)
 const notifications = ref<Notification[]>([])
@@ -80,10 +80,10 @@ function formatNotificationTime(createdAt: string): string {
   }).format(date)
 }
 
-function handleResume() {
-  isGamePausedDialogOpen.value = false
-  resumeGame()
-}
+// function handleResume() {
+//   isGamePausedDialogOpen.value = false
+//   resumeGame()
+// }
 
 function mapNotificationType(item: NotificationItem): Notification['type'] {
   const name = item.notification_type_name?.toLowerCase() ?? ''
@@ -257,13 +257,13 @@ onMounted(async () => {
   await mount(pixiMountRef.value, {
     onPauseTooLong: () => {
       // Away too long — show expired dialog, manual refresh only
-      isGamePausedDialogOpen.value = false
-      sessionExpiredAutoCountdown.value = false
-      isSessionExpiredDialogOpen.value = true
+      // isGamePausedDialogOpen.value = false
+      // sessionExpiredAutoCountdown.value = false
+      // isSessionExpiredDialogOpen.value = true
     },
-    onPause: () => {
-      isGamePausedDialogOpen.value = true   // ← show dialog when paused
-    },
+    // onPause: () => {
+    //   isGamePausedDialogOpen.value = true   // ← show dialog when paused
+    // },
     onAvatarClick: () => {
       isProfileDialogOpen.value = true
     },
@@ -290,9 +290,9 @@ onMounted(async () => {
     },
     onSessionSyncLost: () => {
       // API failure — show expired dialog with auto countdown
-      isGamePausedDialogOpen.value = false
-      sessionExpiredAutoCountdown.value = true
-      isSessionExpiredDialogOpen.value = true
+      // isGamePausedDialogOpen.value = false
+      // sessionExpiredAutoCountdown.value = true
+      // isSessionExpiredDialogOpen.value = true
     },
   })
 })
