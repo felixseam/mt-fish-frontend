@@ -37,25 +37,37 @@ export async function createPlayerProfileUi(
     getAtlasTexture?: (atlasUrl: string, frame: string) => PIXI.Texture;
   },
 ) {
+  // ── Touch detection ────────────────────────────────────────────────────
+  const isTouchLike =
+    typeof window !== "undefined" &&
+    ((window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches ?? false) ||
+      window.innerWidth < 900);
+
   // ── Dimensions ─────────────────────────────────────────────────────────
+  // Bumped up on touch so the panel isn't tiny after the overall UI scale
+  // (see SCALE below) shrinks everything down.
   const panelX = 0;
   const panelY = 0;
-  const panelW = 260;
-  const panelH = 110;
+  const panelW = isTouchLike ? 300 : 260;
+  const panelH = isTouchLike ? 130 : 110;
 
-  const avatarD  = 72;
+  const avatarD  = isTouchLike ? 88 : 72;
   const avatarR  = avatarD / 2;
-  const avatarCX = avatarR + 20;
+  const avatarCX = avatarR + (isTouchLike ? 22 : 20);
   const avatarCY = panelH / 2;
 
   const innerX    = avatarCX + avatarR + 12;
   const innerW    = panelW - innerX - 14;
-  const innerGap  = 6;
-  const innerNameH = 36;
-  const innerCoinH = 32;
+  const innerGap  = isTouchLike ? 8 : 6;
+  const innerNameH = isTouchLike ? 42 : 36;
+  const innerCoinH = isTouchLike ? 38 : 32;
   const totalInnerH = innerNameH + innerGap + innerCoinH;
   const innerNameY  = panelY + Math.floor((panelH - totalInnerH) / 2);
   const innerCoinY  = innerNameY + innerNameH + innerGap;
+
+  const usernameFontSize = isTouchLike ? 20 : 17;
+  const coinFontSize     = isTouchLike ? 21 : 18;
+  const coinIconSize     = isTouchLike ? 26 : 22;
 
   // ── Helpers ─────────────────────────────────────────────────────────────
   const normalizeAvatarPath = (path: string) =>
@@ -93,18 +105,9 @@ export async function createPlayerProfileUi(
     g.endFill();
   }
 
-  // ── 1. Outer panel (dark glass) ───────────────────────────────────────────
+  // ── 1. Outer panel — no border, no fill (kept for layout reference) ──────
   const panelBg = new PIXI.Graphics();
-  drawPanel(panelBg, panelX, panelY, panelW, panelH, CORNER_RADIUS,
-    COLOR.panelBg, 0.92, COLOR.panelStroke, 1.5);
   rootContainer.addChild(panelBg);
-
-  // Subtle top-edge highlight line for a "glass" feel
-  const topHighlight = new PIXI.Graphics();
-  topHighlight.lineStyle(1, 0xffffff, 0.06);
-  topHighlight.moveTo(panelX + CORNER_RADIUS, panelY + 1);
-  topHighlight.lineTo(panelX + panelW - CORNER_RADIUS, panelY + 1);
-  rootContainer.addChild(topHighlight);
 
   // ── 2. Avatar glow ring (drawn, not atlas) ────────────────────────────────
   const ringGlow = new PIXI.Graphics();
@@ -124,17 +127,62 @@ export async function createPlayerProfileUi(
   avatarMask.endFill();
   rootContainer.addChild(avatarMask);
 
-  let avatarTexture = getTexture(normalizedInitialAvatarPath);
-  if (avatarTexture === PIXI.Texture.EMPTY) {
-    avatarTexture = getTexture("/avatar/Avatar6.png");
+  // Placeholder circle shown behind the avatar sprite. If the texture
+  // fails to load you'll see this colored disc instead of a blank hole —
+  // makes missing-asset issues visible instead of silent.
+  const avatarPlaceholder = new PIXI.Graphics();
+  avatarPlaceholder.beginFill(0x274a6b, 1);
+  avatarPlaceholder.drawCircle(avatarCX, avatarCY, avatarR - 1);
+  avatarPlaceholder.endFill();
+  rootContainer.addChild(avatarPlaceholder);
+
+  // A PIXI.Texture object always exists even when nothing loaded — it's
+  // never `null`/`undefined`, and comparing against PIXI.Texture.EMPTY
+  // isn't reliable across texture wrapping. `.valid` + non-zero width is
+  // the real signal that pixel data actually loaded.
+  function isTextureUsable(tex: PIXI.Texture | null | undefined): boolean {
+    return !!tex && tex.valid && tex.width > 0 && tex.height > 0;
   }
 
-  const avatarSprite = new PIXI.Sprite(avatarTexture);
+  function resolveAvatarTexture(path: string): PIXI.Texture {
+    const normalized = normalizeAvatarPath(path);
+    const tex = getTexture(normalized);
+
+    if (isTextureUsable(tex)) {
+      return tex;
+    }
+
+    console.warn(
+      `[ProfileUI] avatar texture not usable for "${normalized}" ` +
+      `(requested as "${path}"). Falling back to default avatar. ` +
+      `Check that this path was preloaded via useFishAssetPreload ` +
+      `BEFORE createPlayerProfileUi runs, and that the path/casing ` +
+      `matches exactly what was preloaded.`,
+    );
+
+    const fallback = getTexture("/avatar/Avatar6.png");
+
+    if (!isTextureUsable(fallback)) {
+      console.warn(
+        `[ProfileUI] fallback "/avatar/Avatar6.png" is ALSO not usable. ` +
+        `This means Avatar6.png itself was never preloaded (or preloaded ` +
+        `under a different path/casing) in useFishAssetPreload — that's ` +
+        `almost certainly why default avatars aren't showing. Showing a ` +
+        `placeholder circle instead.`,
+      );
+    }
+
+    return fallback;
+  }
+
+  const avatarSprite = new PIXI.Sprite(resolveAvatarTexture(initialAvatarPath));
   avatarSprite.anchor.set(0.5);
   avatarSprite.position.set(avatarCX, avatarCY);
   avatarSprite.width  = avatarD - 2;
   avatarSprite.height = avatarD - 2;
   avatarSprite.mask   = avatarMask;
+  // Hide the placeholder once we actually have real pixel data.
+  avatarPlaceholder.visible = !isTextureUsable(avatarSprite.texture);
   rootContainer.addChild(avatarSprite);
 
   // ── 4. Username sub-panel ─────────────────────────────────────────────────
@@ -152,7 +200,7 @@ export async function createPlayerProfileUi(
 
   const usernameText = new PIXI.Text(initialUsername || "Player", {
     fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
-    fontSize: 17,
+    fontSize: usernameFontSize,
     fontWeight: "bold",
     fill: COLOR.textPrimary,
     dropShadow: true,
@@ -185,8 +233,7 @@ export async function createPlayerProfileUi(
   coinAccent.endFill();
   rootContainer.addChild(coinAccent);
 
-  const coinRowY     = innerCoinY + innerCoinH / 2;
-  const coinIconSize = 22;
+  const coinRowY = innerCoinY + innerCoinH / 2;
 
   const coinIconSprite = new PIXI.Sprite(coinIconTexture);
   coinIconSprite.anchor.set(0, 0.5);
@@ -199,7 +246,7 @@ export async function createPlayerProfileUi(
     (options?.initialCoins ?? 0).toLocaleString("en-US"),
     {
       fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
-      fontSize: 18,
+      fontSize: coinFontSize,
       fontWeight: "bold",
       fill: COLOR.textCoin,
       dropShadow: true,
@@ -222,7 +269,7 @@ export async function createPlayerProfileUi(
   // ── 6. Avatar hit area ────────────────────────────────────────────────────
   const avatarHitArea = new PIXI.Graphics();
   avatarHitArea.beginFill(0xffffff, 0.001);
-  avatarHitArea.drawCircle(avatarCX, avatarCY, avatarR + 4);
+  avatarHitArea.drawCircle(avatarCX, avatarCY, avatarR + (isTouchLike ? 8 : 4));
   avatarHitArea.endFill();
   avatarHitArea.eventMode = "static";
   avatarHitArea.cursor    = "pointer";
@@ -268,7 +315,9 @@ export async function createPlayerProfileUi(
 
   // ── Public API ────────────────────────────────────────────────────────────
   function setAvatar(path: string) {
-    avatarSprite.texture = getTexture(normalizeAvatarPath(path));
+    const tex = resolveAvatarTexture(path);
+    avatarSprite.texture = tex;
+    avatarPlaceholder.visible = !isTextureUsable(tex);
   }
 
   function setUsername(name: string) {
@@ -338,7 +387,10 @@ export async function createPlayerProfileUi(
     rootContainer.destroy({ children: true });
   }
 
-  const SCALE = 0.75;
+  // Slightly larger overall scale on touch so the whole panel doesn't
+  // shrink to the same footprint as desktop after the base sizes above
+  // were already bumped up.
+  const SCALE = isTouchLike ? 0.85 : 0.75;
   rootContainer.scale.set(SCALE);
 
   return { container: rootContainer, setAvatar, setUsername, setCoins, destroy };

@@ -1477,7 +1477,7 @@ export function createFishContextMachine(options: {
             startY -
             SHOCK_LIFT +
             (SHOCK_LIFT + BOUNCE_DEPTH) * easeInOut(t / 0.78);
-        } else {
+        } else { 
           obj.y = startY + BOUNCE_DEPTH * (1 - easeOut((t - 0.78) / 0.22));
         }
         obj.rotation = startRot + Math.sin(t * Math.PI * 3) * 0.04 * (1 - t);

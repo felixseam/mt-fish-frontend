@@ -735,10 +735,18 @@ export async function createCannonBetUi(options?: {
     // don't fire if tapping bet buttons
     const local = container.toLocal(e.global);
     const currentBet = getBetStep(currentBetIndex);
-    const currentCoins = getSpendableCoins();
+    const currentCoins = options?.getCurrentCoins?.() ?? Number.POSITIVE_INFINITY;
+    const spendableCoins = Math.max(0, currentCoins - reservedCoins);
 
+    // Only show the dialog when the actual wallet balance is below the bet.
+    // Reserved coins can still block a shot, but we keep that as a silent guard
+    // so the top-up dialog reflects the visible balance the player sees.
     if (currentCoins < currentBet) {
       options?.onInsufficientBalance?.(currentBet, currentCoins);
+      return;
+    }
+
+    if (spendableCoins < currentBet) {
       return;
     }
     aimCannonAt(local.x, local.y);

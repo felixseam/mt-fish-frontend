@@ -9,10 +9,10 @@
 
         <div class="login-shell__header">
           <!-- <p class="login-shell__eyebrow">Aqua Area</p> -->
-          <h1 class="login-shell__title">{{ t('login.title') }}</h1>
-          <p class="login-shell__subtitle">
+          <h1 class="login-shell__title">Login</h1>
+          <!-- <p class="login-shell__subtitle">
             {{ t('login.subtitle') }}
-          </p>
+          </p> -->
         </div>
 
         <v-form class="login-form" @submit.prevent="handleLogin">

@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameSettingsDialog from '~/components/GameSettingsDialog.vue'
 import Insufficientbalancedialog from '~/components/Insufficientbalancedialog.vue'
 import LogoutDialog from '~/components/LogoutDialog.vue'
@@ -40,6 +40,7 @@ import {
   markNotificationAsRead,
   type NotificationItem,
 } from '~/composables/service/notificationApi'
+import { useExperienceStore } from '~/stores/experienceStore'
 import { useAuthStore } from '~/stores/authStore'
 import { useMemberStore } from '~/stores/memberStore'
 
@@ -61,8 +62,11 @@ const statementSheetRef = ref<{ open: () => Promise<void> | void } | null>(null)
 const transactionSheetRef = ref<{ open: () => Promise<void> | void } | null>(null)
 const memberStore = useMemberStore()
 const authStore = useAuthStore()
+const experienceStore = useExperienceStore()
 const { mount, destroy, setPlayerAvatar, resumeGame } = useFishGameplayScene()
 const notificationsPerPage = 10
+const hasEnteredExperience = computed(() => experienceStore.entered)
+let hasBootstrappedExperience = false
 
 const currentCoins = computed(() => Number(memberStore.info.coin_amount ?? '0') || 0)
 const hasMoreNotifications = computed(() => notifications.value.length < notificationTotal.value)
@@ -244,11 +248,16 @@ function handleCoinTransaction() {
 
 function handleLogoutConfirm() {
   memberStore.reset()
+  experienceStore.resetExperience()
   destroy()
   authStore.logout()
 }
 
-onMounted(async () => {
+async function bootstrapExperience() {
+  if (hasBootstrappedExperience || !hasEnteredExperience.value) return
+
+  hasBootstrappedExperience = true
+
   await memberStore.fetchMyInfo()
   await loadNotifications()
 
@@ -295,7 +304,20 @@ onMounted(async () => {
       // isSessionExpiredDialogOpen.value = true
     },
   })
+}
+
+onMounted(() => {
+  void bootstrapExperience()
 })
+
+watch(
+  hasEnteredExperience,
+  (entered) => {
+    if (!entered) return
+    void bootstrapExperience()
+  },
+  { immediate: true },
+)
 
 onBeforeUnmount(() => {
   destroy()

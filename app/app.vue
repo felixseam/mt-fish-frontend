@@ -2,6 +2,12 @@
   <v-app class="app-root">
     <VSonner position="top-right" :visible-toasts="4" />
 
+    <div :class="['app-shell', { 'app-shell--blocked': isAuthenticated && !hasEnteredExperience } ]">
+      <NuxtLayout>
+        <NuxtPage />
+      </NuxtLayout>
+    </div>
+
     <!-- Rotate-to-landscape warning: only shown after loading has finished
          (or immediately for unauthenticated users, e.g. login screens) -->
     <div v-if="showRotateOverlay" class="rotate-overlay">
@@ -34,10 +40,6 @@
         </button>
       </div>
     </div> -->
-
-    <NuxtLayout v-else-if="isAuthenticated ? hasEnteredExperience : true">
-      <NuxtPage />
-    </NuxtLayout>
   </v-app>
 </template>
 
@@ -46,20 +48,22 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue"
 import { VSonner } from "vuetify-sonner";
 import "vuetify-sonner/style.css";
 import { useFishAssetPreload } from "~/composables/game_core/assets/useFishAssetPreload";
+import { useExperienceStore } from "~/stores/experienceStore";
 import { useGameManifestStore } from "~/stores/gameManifestStore";
 import { hydrateAccessToken } from "~/utils/authToken";
 
 const { preloadAppAssets } = useFishAssetPreload();
 const manifestStore = useGameManifestStore();
+const experienceStore = useExperienceStore();
 
 const token = hydrateAccessToken();
 const isAuthenticated = computed(() => !!token.value);
+const hasEnteredExperience = computed(() => experienceStore.entered);
 
 const isPreloading = ref(false);
 const preloadError = ref("");
 const loadProgress = ref(0);
 const readyToEnter = ref(false);
-const hasEnteredExperience = ref(false);
 const isMobileDevice = ref(false);
 
 const SESSION_FLAG = "aqua_preload_done_this_session";
@@ -180,7 +184,7 @@ async function lockLandscape() {
 async function enterExperience() {
   await requestFullscreen();
   await lockLandscape();
-  hasEnteredExperience.value = true;
+  experienceStore.enterExperience();
 }
 
 watch(
@@ -239,15 +243,29 @@ onBeforeUnmount(() => {
 });
 
 watch(readyToEnter, (ready) => {
-  if (ready && isMobileDevice.value && !hasEnteredExperience.value) {
+  if (!ready || hasEnteredExperience.value) return;
+
+  if (isMobileDevice.value) {
     void enterExperience();
+    return;
   }
+
+  experienceStore.enterExperience();
 });
 </script>
 
 <style scoped>
 .app-root {
   min-height: 100dvh;
+}
+
+.app-shell {
+  min-height: 100dvh;
+}
+
+.app-shell--blocked {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .app-preload {

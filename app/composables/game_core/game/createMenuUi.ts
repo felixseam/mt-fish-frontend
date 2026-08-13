@@ -74,7 +74,7 @@ export async function createMenuUi(options?: MenuUiOptions) {
     }
 
     const frameData =
-      atlasData.frames?.[frameName] 
+      atlasData.frames?.[frameName]
       // atlasData.frames?.[frameName.replace(/\.png$/, ".webp")] ??
       // atlasData.frames?.[frameName.replace(/\.webp$/, ".png")] ??
       // atlasData.frames?.[`${frameName}.webp`] ??
@@ -146,16 +146,24 @@ export async function createMenuUi(options?: MenuUiOptions) {
 
   // ─────────────────────────────────────────────────────────────
   // Sizes
+  // Touch sizes bumped up + icon fill now scales proportionally
+  // to the button size instead of subtracting a fixed pixel amount,
+  // so bigger buttons actually show bigger icons.
   // ─────────────────────────────────────────────────────────────
-  const MENU_BTN_SIZE = isTouchLike ? 74 : 64;
+  const MENU_BTN_SIZE = isTouchLike ? 88 : 64;
 
-  const ICON_SIZE = isTouchLike ? 64 : 56;
+  const ICON_SIZE = isTouchLike ? 72 : 56;
 
-  const ICON_GAP = isTouchLike ? 14 : 12;
+  const ICON_GAP = isTouchLike ? 16 : 12;
 
-  const PADDING_X = isTouchLike ? 22 : 20;
+  const PADDING_X = isTouchLike ? 24 : 20;
 
-  const PADDING_Y = isTouchLike ? 22 : 20;
+  const PADDING_Y = isTouchLike ? 24 : 20;
+
+  // Fill ratio: icon glyph fills ~78% of its circle, leaving ~22%
+  // padding on each side. Keeps things proportional at any size.
+  const MENU_ICON_FILL_RATIO = 0.78;
+  const ITEM_ICON_FILL_RATIO = 0.8;
 
   const panelW = ICON_SIZE + PADDING_X * 2;
 
@@ -198,7 +206,16 @@ export async function createMenuUi(options?: MenuUiOptions) {
   menuBtnContainer.cursor = "pointer";
 
   menuBtnContainer.zIndex = 2;
-  menuBtnContainer.hitArea = new PIXI.Rectangle(0, 0, MENU_BTN_SIZE, MENU_BTN_SIZE);
+
+  // Slightly larger hit area than the visual circle so mis-taps
+  // near the edge on phone still register.
+  const MENU_BTN_HIT_PADDING = isTouchLike ? 8 : 0;
+  menuBtnContainer.hitArea = new PIXI.Rectangle(
+    -MENU_BTN_HIT_PADDING,
+    -MENU_BTN_HIT_PADDING,
+    MENU_BTN_SIZE + MENU_BTN_HIT_PADDING * 2,
+    MENU_BTN_SIZE + MENU_BTN_HIT_PADDING * 2,
+  );
 
   const menuBtnBg = new PIXI.Graphics();
 
@@ -229,9 +246,11 @@ export async function createMenuUi(options?: MenuUiOptions) {
     MENU_BTN_SIZE / 2,
   );
 
-  menuIcon.width = MENU_BTN_SIZE - 20;
+  const menuIconSize = MENU_BTN_SIZE * MENU_ICON_FILL_RATIO;
 
-  menuIcon.height = MENU_BTN_SIZE - 20;
+  menuIcon.width = menuIconSize;
+
+  menuIcon.height = menuIconSize;
 
   menuBtnContainer.addChild(menuIcon);
 
@@ -248,9 +267,14 @@ export async function createMenuUi(options?: MenuUiOptions) {
 
   panel.zIndex = 1;
 
+  // Positive offset pushes the panel further down from the button's
+  // vertical center. Increase this to move it down more, decrease
+  // (or make negative) to move it back up.
+  const PANEL_VERTICAL_OFFSET = isTouchLike ? 60 : 40;
+
   panel.position.set(
     MENU_BTN_SIZE + 10,
-    -(panelH / 2) + MENU_BTN_SIZE / 2,
+    -(panelH / 2) + MENU_BTN_SIZE / 2 + PANEL_VERTICAL_OFFSET,
   );
 
   // ─────────────────────────────────────────────────────────────
@@ -310,7 +334,16 @@ export async function createMenuUi(options?: MenuUiOptions) {
     btnContainer.eventMode = "static";
 
     btnContainer.cursor = "pointer";
-    btnContainer.hitArea = new PIXI.Rectangle(0, 0, ICON_SIZE, ICON_SIZE);
+
+    // Larger hit area than the visual circle for touch, same trick
+    // as the main menu button.
+    const ITEM_HIT_PADDING = isTouchLike ? 6 : 0;
+    btnContainer.hitArea = new PIXI.Rectangle(
+      -ITEM_HIT_PADDING,
+      -ITEM_HIT_PADDING,
+      ICON_SIZE + ITEM_HIT_PADDING * 2,
+      ICON_SIZE + ITEM_HIT_PADDING * 2,
+    );
 
     btnContainer.position.set(
       PADDING_X,
@@ -346,9 +379,11 @@ export async function createMenuUi(options?: MenuUiOptions) {
       ICON_SIZE / 2,
     );
 
-    iconSprite.width = ICON_SIZE - 14;
+    const itemIconSize = ICON_SIZE * ITEM_ICON_FILL_RATIO;
 
-    iconSprite.height = ICON_SIZE - 14;
+    iconSprite.width = itemIconSize;
+
+    iconSprite.height = itemIconSize;
 
     btnContainer.addChild(iconSprite);
 
