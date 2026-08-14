@@ -226,6 +226,10 @@ export function createWaterOverlayLayer(options: WaterOverlayOptions) {
     if (!currentBackgroundTexture) return;
     const dt = app.ticker.deltaMS / 1000;
 
+    if (currentBackgroundSprite) {
+      currentBackgroundSprite.filterArea = currentBackgroundSprite.getBounds();
+    }
+
     offsetX = wrapUnit(offsetX - 0.1 * scrollSpeed * dt);
     offsetY = wrapUnit(offsetY - 0.07 * scrollSpeed * dt);
     offset2X = wrapUnit(offset2X + 0.07 * scrollSpeed * dt);

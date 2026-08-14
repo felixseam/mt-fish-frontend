@@ -59,25 +59,6 @@ const NAGA_ATLAS_URL = "/fish/fish-all-star/resources/naga.atlas.txt";
 const PROFILE_UI_X = 12;
 const PROFILE_UI_Y = 12;
 const PAUSE_RELOAD_THRESHOLD_MS = 30_000;
-const IOS_MAX_RENDER_RESOLUTION = 1.5;
-const DEFAULT_MAX_RENDER_RESOLUTION = 2;
-
-function isIOSLikeDevice() {
-  if (typeof navigator === "undefined") return false;
-  return (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-  );
-}
-
-function getRendererResolution() {
-  if (typeof window === "undefined") return 1;
-  const dpr = window.devicePixelRatio || 1;
-  return Math.min(
-    dpr,
-    isIOSLikeDevice() ? IOS_MAX_RENDER_RESOLUTION : DEFAULT_MAX_RENDER_RESOLUTION,
-  );
-}
 
 const scenes: SceneDef[] = [
   {
@@ -461,6 +442,9 @@ export function useFishGameplayScene() {
     const screenW = cont.clientWidth;
     const screenH = cont.clientHeight;
     const isPortrait = screenH > screenW;
+    console.log(
+      `Applying viewport resize: ${screenW}x${screenH}, portrait: ${isPortrait}`,
+    );
 
     if (isPortrait) {
       // swap W/H for rotation
@@ -631,7 +615,7 @@ export function useFishGameplayScene() {
       pauseReloadTimer = null;
     }
     isGamePausedByFocus = false;
-    // contextMachine?.setPaused(false);
+    contextMachine?.setPaused(false);
     pixiApp.ticker.start();
 
     sessionRuntime.resumeSnapshotLoop(
@@ -796,7 +780,7 @@ export function useFishGameplayScene() {
       if (paused) {
         if (isGamePausedByFocus) return;
         isGamePausedByFocus = true; // ← set BEFORE ticker stop
-        // contextMachine?.setPaused(true);
+        contextMachine?.setPaused(true);
         pixiApp.ticker.stop();
         sessionRuntime.pauseSnapshotLoop();
         pauseReloadTimer = setTimeout(() => {
@@ -835,9 +819,8 @@ export function useFishGameplayScene() {
       height: container.clientHeight,
       antialias: true,
       backgroundAlpha: 0,
-      resolution: getRendererResolution(),
+      resolution: window.devicePixelRatio || 1,
       autoDensity: true,
-      powerPreference: "high-performance",
     });
 
     container.style.position = "relative";
@@ -897,6 +880,8 @@ export function useFishGameplayScene() {
           const isJackpot = response?.result.is_jackpot;
           const jackpotReward =
             response?.result.reward.jackpot_reward.payout_amount;
+
+          console.log("===========================================", isReward);
 
           if (isKill && target.display) {
             contextMachine?.playKillAnimationForDisplay(target.display);

@@ -41,6 +41,7 @@ export function runBossBannerSequence(options: BossBannerRunnerOptions): void {
     // band.width * childScaleX * bannerLayer.scaleX = GAME_WIDTH * bannerLayer.scaleX
     // so band.width = GAME_WIDTH / childScaleX
     const childScaleX = (content as PIXI.Container).scale.x;
+    console.log("banner width:===============", bannerLayer.width);
     (banner as any).__setFullWidth?.(options.gameWidth, childScaleX);
   }
 

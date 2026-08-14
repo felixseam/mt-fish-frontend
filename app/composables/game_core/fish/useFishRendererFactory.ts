@@ -45,15 +45,6 @@ type AtlasSpriteState = {
   frames: string[];
 };
 
-type FishRenderCacheEntry = {
-  fish: ApiFishType;
-  scale: number;
-  zIndex: number;
-  spriteAnimationSpeed: number;
-  spineAnimationSpeed: number;
-  states: Map<string, AtlasSpriteState | null>;
-};
-
 export type FishDisplayHandle = {
   display: PIXI.DisplayObject;
   destroy: () => void;
@@ -61,62 +52,38 @@ export type FishDisplayHandle = {
 
 const DEFAULT_SPRITE_ANIMATION_SPEED = 0.25;
 const DEFAULT_SPINE_ANIMATION_SPEED = 1;
-const fishEntryCache = new Map<number, FishRenderCacheEntry>();
-const sortedFrameCache = new WeakMap<string[], string[]>();
 
 function getFishEntry(spawnFishId: number): ApiFishType | undefined {
-  let cached = fishEntryCache.get(spawnFishId);
-  if (cached) return cached.fish;
-
-  const entry = getManifestFishTypes().find((f) => f.id === spawnFishId) as
+  return getManifestFishTypes().find((f) => f.id === spawnFishId) as
     | ApiFishType
     | undefined;
-  if (!entry) return undefined;
-
-  const scale =
-    typeof entry.scale === "number" && Number.isFinite(entry.scale)
-      ? entry.scale
-      : 1;
-  const zIndex =
-    typeof entry.zindex === "number" && Number.isFinite(entry.zindex)
-      ? entry.zindex
-      : 0;
-  const baseSpeed =
-    typeof entry.base_speed === "number" && Number.isFinite(entry.base_speed)
-      ? entry.base_speed
-      : null;
-
-  cached = {
-    fish: entry,
-    scale,
-    zIndex,
-    spriteAnimationSpeed: baseSpeed ?? DEFAULT_SPRITE_ANIMATION_SPEED,
-    spineAnimationSpeed: baseSpeed ?? DEFAULT_SPINE_ANIMATION_SPEED,
-    states: new Map(),
-  };
-  fishEntryCache.set(spawnFishId, cached);
-  return entry;
 }
 
 function getFishScale(spawnFishId: number): number {
-  getFishEntry(spawnFishId);
-  return fishEntryCache.get(spawnFishId)?.scale ?? 1;
+  const entry = getFishEntry(spawnFishId);
+  const scale = entry?.scale;
+  return typeof scale === "number" && Number.isFinite(scale) ? scale : 1;
 }
 
 function getFishZOrder(spawnFishId: number): number {
-  getFishEntry(spawnFishId);
-  return fishEntryCache.get(spawnFishId)?.zIndex ?? 0;
+  const entry = getFishEntry(spawnFishId);
+  const zOrder = entry?.zindex;
+  return typeof zOrder === "number" && Number.isFinite(zOrder) ? zOrder : 0;
 }
 
 function getFishAnimationSpeed(
   spawnFishId: number,
   renderer: "atlas_sprite_anim" | "spine",
 ): number {
-  getFishEntry(spawnFishId);
-  const cached = fishEntryCache.get(spawnFishId);
+  const entry = getFishEntry(spawnFishId);
+  // Manifest data already resolves base_speed per fish using animation overrides.
+  const speed = entry?.base_speed;
+  if (typeof speed === "number" && Number.isFinite(speed)) {
+    return speed;
+  }
   return renderer === "spine"
-    ? (cached?.spineAnimationSpeed ?? DEFAULT_SPINE_ANIMATION_SPEED)
-    : (cached?.spriteAnimationSpeed ?? DEFAULT_SPRITE_ANIMATION_SPEED);
+    ? DEFAULT_SPINE_ANIMATION_SPEED
+    : DEFAULT_SPRITE_ANIMATION_SPEED;
 }
 
 function buildShadowSprite(
@@ -160,10 +127,7 @@ function getAtlasUrlFromPrefix(prefix: string | null): string | null {
 }
 
 function sortFramesForPlayback(frames: string[]) {
-  const cached = sortedFrameCache.get(frames);
-  if (cached) return cached;
-
-  const sorted = [...frames].sort((left, right) => {
+  return [...frames].sort((left, right) => {
     const leftNums = left.match(/\d+/g)?.map(Number) ?? [];
     const rightNums = right.match(/\d+/g)?.map(Number) ?? [];
     const maxLen = Math.max(leftNums.length, rightNums.length);
@@ -176,8 +140,6 @@ function sortFramesForPlayback(frames: string[]) {
 
     return left.localeCompare(right);
   });
-  sortedFrameCache.set(frames, sorted);
-  return sorted;
 }
 
 function normalizeStateFrames(state: ApiRenderState): AtlasSpriteState | null {
@@ -198,25 +160,16 @@ function getAtlasState(
   const fishEntry = getFishEntry(spawnFishId);
   if (!fishEntry?.render_family) return null;
 
-  const cache = fishEntryCache.get(spawnFishId);
-
   const family = fishEntry.render_family;
   const typeCode = family.render_type?.type_code;
   if (typeCode !== "atlas_sprite_anim") return null;
 
   const targetState = stateName ?? fishEntry.default_state_code ?? "move";
-  const cachedState = cache?.states.get(targetState);
-  if (cachedState !== undefined) return cachedState;
 
   const state = family.render_states.find((s) => s.state_code === targetState);
-  if (!state) {
-    cache?.states.set(targetState, null);
-    return null;
-  }
+  if (!state) return null;
 
-  const normalized = normalizeStateFrames(state);
-  cache?.states.set(targetState, normalized);
-  return normalized;
+  return normalizeStateFrames(state);
 }
 
 export function getRenderableFishAtlasUrls(): string[] {
@@ -264,21 +217,6 @@ export function createFishRendererFactory(options: {
   getAtlasTexture: (atlasUrl: string, frame: string) => PIXI.Texture;
 }) {
   const { getAtlasTexture } = options;
-  const textureFramesCache = new Map<string, PIXI.Texture[]>();
-
-  const getTexturesForState = (state: AtlasSpriteState) => {
-    const cacheKey = `${state.atlasUrl}\n${state.frames.join("\n")}`;
-    const cached = textureFramesCache.get(cacheKey);
-    if (cached) return cached;
-
-    const textures: PIXI.Texture[] = [];
-    for (const frame of state.frames) {
-      const texture = getAtlasTexture(state.atlasUrl, frame);
-      if (texture !== PIXI.Texture.WHITE) textures.push(texture);
-    }
-    textureFramesCache.set(cacheKey, textures);
-    return textures;
-  };
 
   function createAnimatedFishBySpawnFishId(
     spawnFishId: number,
@@ -340,7 +278,9 @@ export function createFishRendererFactory(options: {
       };
     }
 
-    const textures = getTexturesForState(state);
+    const textures = state.frames
+      .map((frame) => getAtlasTexture(state.atlasUrl, frame))
+      .filter((texture) => texture !== PIXI.Texture.WHITE);
 
     if (textures.length === 0) return null;
 
