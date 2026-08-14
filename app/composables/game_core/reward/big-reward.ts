@@ -90,6 +90,9 @@ const SHOWER_SCALE_MAX = 0.85;
 const SHOWER_FLY_DURATION_MS = 600;
 const SHOWER_FLY_STAGGER_MS = 12;
 const SHOWER_AVOID_RADIUS = 170; // keep-clear zone around the reward label
+let cachedShowerCoinTextures: PIXI.Texture[] | null = null;
+let cachedExplodeTextures: PIXI.Texture[] | null = null;
+let cachedBigCoinFrameTextures: PIXI.Texture[] | null = null;
 
 // Easing
 function easeOutBack(t: number): number {
@@ -102,6 +105,21 @@ function easeOut(t: number): number {
 }
 function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+function getCachedAtlasTextures(
+  current: PIXI.Texture[] | null,
+  frames: readonly string[],
+  getAtlasTexture: (atlasUrl: string, frame: string) => PIXI.Texture,
+) {
+  if (current) return current;
+
+  const textures: PIXI.Texture[] = [];
+  for (const frame of frames) {
+    const texture = getAtlasTexture(COIN_ATLAS_URL, frame);
+    if (texture !== PIXI.Texture.WHITE) textures.push(texture);
+  }
+  return textures;
 }
 
 // Reward-size tiers
@@ -209,9 +227,12 @@ function spawnCoinShower(
   boxTarget?: { x: number; y: number },
   onShowerComplete?: () => void,
 ): void {
-  const coinTextures = COIN_FRAMES.map((f) =>
-    getAtlasTexture(COIN_ATLAS_URL, f),
-  ).filter((t) => t !== PIXI.Texture.WHITE);
+  cachedShowerCoinTextures = getCachedAtlasTextures(
+    cachedShowerCoinTextures,
+    COIN_FRAMES,
+    getAtlasTexture,
+  );
+  const coinTextures = cachedShowerCoinTextures;
 
   if (coinTextures.length === 0) {
     onShowerComplete?.();
@@ -281,9 +302,12 @@ function spawnCoinShower(
     }
   }
 
-  const explodeTextures = EXPLODE_FRAMES.map((f) =>
-    getAtlasTexture(COIN_ATLAS_URL, f),
-  ).filter((t) => t !== PIXI.Texture.WHITE);
+  cachedExplodeTextures = getCachedAtlasTextures(
+    cachedExplodeTextures,
+    EXPLODE_FRAMES,
+    getAtlasTexture,
+  );
+  const explodeTextures = cachedExplodeTextures;
 
   type ClusterBurst = {
     sprite: PIXI.AnimatedSprite;
@@ -357,9 +381,10 @@ function spawnCoinShower(
       flyTriggered = true;
       PIXI.Ticker.shared.remove(onTick);
 
-      const liveSprites = coins
-        .map((c) => c.sprite)
-        .filter((s) => !s.destroyed);
+      const liveSprites: PIXI.AnimatedSprite[] = [];
+      for (const coin of coins) {
+        if (!coin.sprite.destroyed) liveSprites.push(coin.sprite);
+      }
 
       if (boxTarget && liveSprites.length > 0) {
         flyShowerCoinsToBox(liveSprites, boxTarget, () => onShowerComplete?.());
@@ -377,57 +402,93 @@ function flyShowerCoinsToBox(
   target: { x: number; y: number },
   onComplete?: () => void,
 ): void {
-  let completed = 0;
+  type ShowerFlyState = {
+    coin: PIXI.AnimatedSprite;
+    delay: number;
+    startX: number;
+    startY: number;
+    midX: number;
+    midY: number;
+    startScale: number;
+    stopped: boolean;
+    done: boolean;
+  };
 
-  coins.forEach((coin, i) => {
-    const delay = i * SHOWER_FLY_STAGGER_MS;
+  const flyStates: ShowerFlyState[] = [];
+  for (let i = 0; i < coins.length; i++) {
+    const coin = coins[i]!;
     const startX = coin.x;
     const startY = coin.y;
-    const midX = (startX + target.x) / 2 + (Math.random() - 0.5) * 150;
-    const midY = Math.min(startY, target.y) - 100 - Math.random() * 80;
-    let elapsed = 0;
-    const startScale = coin.scale.x;
-    let stopped = false;
+    flyStates.push({
+      coin,
+      delay: i * SHOWER_FLY_STAGGER_MS,
+      startX,
+      startY,
+      midX: (startX + target.x) / 2 + (Math.random() - 0.5) * 150,
+      midY: Math.min(startY, target.y) - 100 - Math.random() * 80,
+      startScale: coin.scale.x,
+      stopped: false,
+      done: false,
+    });
+  }
 
-    const onFly = () => {
+  let elapsed = 0;
+  let completed = 0;
+
+  const onFly = () => {
+    elapsed += PIXI.Ticker.shared.elapsedMS;
+
+    for (const state of flyStates) {
+      if (state.done) continue;
+      const coin = state.coin;
       if (coin.destroyed) {
-        PIXI.Ticker.shared.remove(onFly);
-        if (++completed === coins.length) onComplete?.();
-        return;
+        state.done = true;
+        completed++;
+        continue;
       }
 
-      elapsed += PIXI.Ticker.shared.elapsedMS;
-      if (elapsed < delay) return;
+      if (elapsed < state.delay) continue;
 
-      if (!stopped) {
+      if (!state.stopped) {
         coin.stop();
-        stopped = true;
+        state.stopped = true;
       }
 
-      const t = Math.min((elapsed - delay) / SHOWER_FLY_DURATION_MS, 1);
+      const t = Math.min((elapsed - state.delay) / SHOWER_FLY_DURATION_MS, 1);
       const et = easeInOut(t);
       const inv = 1 - et;
 
-      coin.x = inv * inv * startX + 2 * inv * et * midX + et * et * target.x;
-      coin.y = inv * inv * startY + 2 * inv * et * midY + et * et * target.y;
+      coin.x =
+        inv * inv * state.startX +
+        2 * inv * et * state.midX +
+        et * et * target.x;
+      coin.y =
+        inv * inv * state.startY +
+        2 * inv * et * state.midY +
+        et * et * target.y;
 
       if (t > 0.8) {
         const endT = (t - 0.8) / 0.2;
-        coin.scale.set(startScale * (1 - endT * 0.75));
+        coin.scale.set(state.startScale * (1 - endT * 0.75));
         coin.alpha = 1 - endT;
       }
 
       if (t >= 1) {
-        PIXI.Ticker.shared.remove(onFly);
+        state.done = true;
         coin.stop();
         coin.parent?.removeChild(coin);
         coin.destroy();
-        if (++completed === coins.length) onComplete?.();
+        completed++;
       }
-    };
+    }
 
-    PIXI.Ticker.shared.add(onFly);
-  });
+    if (completed >= flyStates.length) {
+      PIXI.Ticker.shared.remove(onFly);
+      onComplete?.();
+    }
+  };
+
+  PIXI.Ticker.shared.add(onFly);
 }
 
 // Public types
@@ -470,9 +531,12 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
     return;
   }
 
-  const explodeTextures = EXPLODE_FRAMES.map((f) =>
-    getAtlasTexture(COIN_ATLAS_URL, f),
-  ).filter((t) => t !== PIXI.Texture.WHITE);
+  cachedExplodeTextures = getCachedAtlasTextures(
+    cachedExplodeTextures,
+    EXPLODE_FRAMES,
+    getAtlasTexture,
+  );
+  const explodeTextures = cachedExplodeTextures;
 
   if (explodeTextures.length === 0) {
     console.warn("[bigReward] coin explode frames not loaded from coin atlas");
@@ -558,9 +622,12 @@ export function showBigRewardEffect(options: BigRewardEffectOptions): void {
   root.addChild(rewardVisual);
 
   // Circle coin group (z: 9 within rewardVisual)
-  const bigCoinFrameTextures = BIG_COIN_FRAMES.map((f) =>
-    getAtlasTexture(COIN_ATLAS_URL, f),
-  ).filter((t) => t !== PIXI.Texture.WHITE);
+  cachedBigCoinFrameTextures = getCachedAtlasTextures(
+    cachedBigCoinFrameTextures,
+    BIG_COIN_FRAMES,
+    getAtlasTexture,
+  );
+  const bigCoinFrameTextures = cachedBigCoinFrameTextures;
 
   const coinTextures =
     bigCoinFrameTextures.length > 0 ? bigCoinFrameTextures : [bigCoinTex];
@@ -867,28 +934,26 @@ function fadeOutSprites(
   }
 
   const FADE_MS = 300;
-  let completed = 0;
+  let elapsed = 0;
 
-  sprites.forEach((sprite) => {
-    let elapsed = 0;
-    const onFade = () => {
-      if (sprite.destroyed) {
-        PIXI.Ticker.shared.remove(onFade);
-        if (++completed === sprites.length) onComplete?.();
-        return;
-      }
+  const onFade = () => {
+    elapsed += PIXI.Ticker.shared.elapsedMS;
+    const t = Math.min(elapsed / FADE_MS, 1);
 
-      elapsed += PIXI.Ticker.shared.elapsedMS;
-      const t = Math.min(elapsed / FADE_MS, 1);
-      sprite.alpha = 1 - t;
+    for (const sprite of sprites) {
+      if (!sprite.destroyed) sprite.alpha = 1 - t;
+    }
 
-      if (t >= 1) {
-        PIXI.Ticker.shared.remove(onFade);
-        sprite.parent?.removeChild(sprite);
-        sprite.destroy();
-        if (++completed === sprites.length) onComplete?.();
-      }
-    };
-    PIXI.Ticker.shared.add(onFade);
-  });
+    if (t < 1) return;
+
+    PIXI.Ticker.shared.remove(onFade);
+    for (const sprite of sprites) {
+      if (sprite.destroyed) continue;
+      sprite.parent?.removeChild(sprite);
+      sprite.destroy();
+    }
+    onComplete?.();
+  };
+
+  PIXI.Ticker.shared.add(onFade);
 }

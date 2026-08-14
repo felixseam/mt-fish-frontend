@@ -36,6 +36,7 @@ const BOSS_NAME_FRAMES: Record<number, string> = {
   19: "bossname_03.png",
   20: "bossname_08.png",
 };
+let cachedExplosionFrames: PIXI.Texture[] | null = null;
 
 // ── Timing ────────────────────────────────────────────────────────────────────
 const INTRO_MS = 450;
@@ -103,9 +104,16 @@ function playExplosion(
   getFbfTex: (frame: string) => PIXI.Texture,
   sc = 1.4,
 ): void {
-  const frames = EXPLOSION_FRAMES.map(getFbfTex).filter(
-    (t) => t !== PIXI.Texture.WHITE,
-  );
+  if (!cachedExplosionFrames) {
+    const frames: PIXI.Texture[] = [];
+    for (const frame of EXPLOSION_FRAMES) {
+      const texture = getFbfTex(frame);
+      if (texture !== PIXI.Texture.WHITE) frames.push(texture);
+    }
+    cachedExplosionFrames = frames;
+  }
+
+  const frames = cachedExplosionFrames;
   if (!frames.length) return;
 
   const spr = new PIXI.Sprite(frames[0]);
@@ -401,9 +409,6 @@ export function showBossCatchEffect(options: BossCatchEffectOptions): void {
   // slot.x is in barContainer coords, barLeftEdge is the left edge of the fill
   const starThresholds = STAR_SLOTS.map((slot) => slot.x - barLeftEdge);
 
-  console.log("starThresholds", starThresholds);
-  // Should log something like [25, 65, 115, 180, 255] — increasing left→right
-
   // ── Tick state ────────────────────────────────────────────────────────────
 
   // const starFired = new Array<boolean>(MAX_STARS).fill(false);
@@ -515,17 +520,6 @@ export function showBossCatchEffect(options: BossCatchEffectOptions): void {
       // 65 + (115 - 65) * 0.995 = 65 + 49.75 = ~115 → stops just before star 3 ✓
 
       const currentW = easedT * targetW;
-
-      console.log(
-        "progress",
-        progress,
-        "starCount",
-        starCount,
-        "winOdd",
-        winOdd,
-        "maxKillOdd",
-        maxKillOdd,
-      );
 
       // Always redraw mask at current position (even while paused — bar stays frozen)
       fillMask.clear();

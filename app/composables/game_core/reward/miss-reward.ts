@@ -45,14 +45,24 @@ const EXPLOSION_FRAMES = [
   "ef_coin_0015.png",
 ] as const;
 
-// catch_big.atlas.txt frames
-const SHINE_FRAME = "bg_y_light01_000.png"; // effect.atlas.txt
-const COIN_FRAME = "s_coin0000.png"; // coin.atlas.txt
+const SHINE_FRAME = "bg_y_light01_000.png";
+const COIN_FRAME = "s_coin0000.png";
 const GOLDEN_FRAME = "rewardcolorbg2_out.png";
 const RGB_BG_FRAME = "rewardcolorbg3_02.png";
 const CIRCLE_FRAME = "rewardcolorbg.png";
 const BANNER_FRAME = "rewardnamebg.png";
 const REWARD_PANEL_SCALE = 0.6;
+const ORBIT_RADIUS = 90;
+
+// Explosion timing — replicates the original AnimatedSprite's
+// animationSpeed=0.55 at a nominal 60fps ticker rate.
+const EXPLOSION_ANIM_SPEED = 0.55;
+const EXPLOSION_FPS_BASE = 60;
+
+const FLY_MS = 600;
+const SHINE_MS = 350;
+const INTRO_MS = 420;
+const EXIT_MS = 320;
 
 //  Easing
 function easeOutBack(t: number): number {
@@ -87,289 +97,216 @@ export type FishMissRewardOptions = {
 type GetAtlasTex = (atlasUrl: string, frame: string) => PIXI.Texture;
 type GetLocalTex = (lang: LocalizeLanguage, frame: string) => PIXI.Texture;
 
-//  Step 1: Explosion at fish position
-function playExplosion(
-  layer: PIXI.Container,
-  x: number,
-  y: number,
-  getAtlasTexture: GetAtlasTex,
-  onPeak: () => void,
-): void {
-  const textures = EXPLOSION_FRAMES.map((f) =>
-    getAtlasTexture(COIN_ATLAS_URL, f),
-  ).filter((t) => t !== PIXI.Texture.WHITE);
+// ============================================================
+//  Asset cache — resolved once, reused forever
+// ============================================================
 
-  if (textures.length === 0) {
-    onPeak();
-    return;
-  }
-
-  const explosion = new PIXI.AnimatedSprite(textures);
-  explosion.anchor.set(0.5);
-  explosion.position.set(x, y);
-  explosion.animationSpeed = 0.55;
-  explosion.loop = false;
-  explosion.scale.set(1.4);
-  explosion.zIndex = 9998;
-  layer.sortableChildren = true;
-  layer.addChild(explosion);
-  (explosion as any).__isRewardEffect = true;
-
-  const peakFrame = Math.floor(textures.length * 0.45);
-  let peaked = false;
-
-  explosion.onFrameChange = (frame) => {
-    if (!peaked && frame >= peakFrame) {
-      peaked = true;
-      onPeak();
-    }
-  };
-  explosion.onComplete = () => {
-    if (!peaked) onPeak();
-    explosion.parent?.removeChild(explosion);
-    explosion.destroy();
-  };
-  explosion.play();
+interface RewardAssetCache {
+  explosionTextures: PIXI.Texture[];
+  lightTextures: PIXI.Texture[];
+  coinTexture: PIXI.Texture;
+  shineTexture: PIXI.Texture;
+  goldenFrameTexture: PIXI.Texture;
+  rgbBgTexture: PIXI.Texture;
+  circleBgTexture: PIXI.Texture;
+  bannerTexture: PIXI.Texture;
+  winTextures: Map<LocalizeLanguage, PIXI.Texture>;
 }
 
-//  Step 2: Coin arc fly
-function playCoinFly(
-  layer: PIXI.Container,
-  fromX: number,
-  fromY: number,
-  toX: number,
-  toY: number,
-  getAtlasTexture: GetAtlasTex,
-  onArrived: () => void,
-): void {
-  const coinTex = getAtlasTexture(COIN_ATLAS_URL, COIN_FRAME);
-  if (coinTex === PIXI.Texture.WHITE) {
-    onArrived();
-    return;
+let assetCache: RewardAssetCache | null = null;
+
+function resolveAssetCache(getAtlasTexture: GetAtlasTex): RewardAssetCache {
+  if (assetCache) return assetCache;
+
+  const explosionTextures: PIXI.Texture[] = [];
+  for (const frame of EXPLOSION_FRAMES) {
+    const tex = getAtlasTexture(COIN_ATLAS_URL, frame);
+    if (tex !== PIXI.Texture.WHITE) explosionTextures.push(tex);
   }
 
-  const coin = new PIXI.Sprite(coinTex);
-  coin.anchor.set(0.5);
-  coin.position.set(fromX, fromY);
-  coin.zIndex = 9999;
-  layer.addChild(coin);
-  (coin as any).__isRewardEffect = true;
-
-  const FLY_MS = 600;
-  let elapsed = 0;
-
-  const onTick = () => {
-    const dt = PIXI.Ticker.shared.elapsedMS;
-    elapsed += dt;
-    const t = Math.min(elapsed / FLY_MS, 1);
-    const et = easeOut(t);
-
-    coin.x = fromX + (toX - fromX) * et;
-    coin.y = fromY + (toY - fromY) * et;
-    coin.rotation += dt * 0.003;
-
-    if (t > 0.75) {
-      coin.alpha = 1 - (t - 0.75) / 0.25;
-    }
-
-    if (t >= 1) {
-      PIXI.Ticker.shared.remove(onTick);
-      coin.parent?.removeChild(coin);
-      coin.destroy();
-      onArrived();
-    }
-  };
-
-  PIXI.Ticker.shared.add(onTick);
-}
-
-//  Step 3: Shine burst at reward position
-function playShine(
-  layer: PIXI.Container,
-  x: number,
-  y: number,
-  getAtlasTexture: GetAtlasTex,
-  onDone: () => void,
-): void {
-  const shineTex = getAtlasTexture(EFFECT_ATLAS_URL, SHINE_FRAME);
-  if (shineTex === PIXI.Texture.WHITE) {
-    onDone();
-    return;
+  const lightTextures: PIXI.Texture[] = [];
+  for (const frame of LIGHT_FRAMES) {
+    const tex = getAtlasTexture(CATCH_BIG_ATLAS_URL, frame);
+    if (tex !== PIXI.Texture.WHITE) lightTextures.push(tex);
   }
 
-  const shine = new PIXI.Sprite(shineTex);
-  shine.anchor.set(0.5);
-  shine.position.set(x, y);
-  shine.scale.set(0);
-  shine.zIndex = 9998;
-  layer.addChild(shine);
-  (shine as any).__isRewardEffect = true;
-
-  const SHINE_MS = 350;
-  let elapsed = 0;
-
-  const onTick = () => {
-    const dt = PIXI.Ticker.shared.elapsedMS;
-    elapsed += dt;
-    const t = Math.min(elapsed / SHINE_MS, 1);
-
-    shine.scale.set(easeOut(t) * 2.5);
-    shine.alpha = t < 0.4 ? 1 : 1 - (t - 0.4) / 0.6;
-    shine.rotation += dt * 0.004;
-
-    if (t >= 1) {
-      PIXI.Ticker.shared.remove(onTick);
-      shine.parent?.removeChild(shine);
-      shine.destroy();
-      onDone();
-    }
+  assetCache = {
+    explosionTextures,
+    lightTextures,
+    coinTexture: getAtlasTexture(COIN_ATLAS_URL, COIN_FRAME),
+    shineTexture: getAtlasTexture(EFFECT_ATLAS_URL, SHINE_FRAME),
+    goldenFrameTexture: getAtlasTexture(CATCH_BIG_ATLAS_URL, GOLDEN_FRAME),
+    rgbBgTexture: getAtlasTexture(CATCH_BIG_ATLAS_URL, RGB_BG_FRAME),
+    circleBgTexture: getAtlasTexture(CATCH_BIG_ATLAS_URL, CIRCLE_FRAME),
+    bannerTexture: getAtlasTexture(CATCH_BIG_ATLAS_URL, BANNER_FRAME),
+    winTextures: new Map(),
   };
-
-  PIXI.Ticker.shared.add(onTick);
+  return assetCache;
 }
 
-//  Step 4: Reward panel
-type RewardPanelOptions = {
-  layer: PIXI.Container;
-  rewardX: number;
-  rewardY: number;
-  amount: number;
-  fishName: string;
-  fishId?: number;
-  durationMs: number;
+function resolveWinTexture(
+  lang: LocalizeLanguage,
+  getLocalizedTexture: GetLocalTex,
+): PIXI.Texture {
+  const cache = assetCache!;
+  let tex = cache.winTextures.get(lang);
+  if (!tex) {
+    tex = getLocalizedTexture(lang, "win.png");
+    cache.winTextures.set(lang, tex);
+  }
+  return tex;
+}
+
+// Cache asset-getter functions so the composable is only unwrapped once.
+let cachedGetters: {
   getAtlasTexture: GetAtlasTex;
   getLocalizedTexture: GetLocalTex;
-  onComplete?: () => void;
-};
+} | null = null;
 
-function spawnRewardPanel(options: RewardPanelOptions): void {
-  const {
-    layer,
-    rewardX,
-    rewardY,
-    amount,
-    fishName,
-    fishId,
-    durationMs,
-    getAtlasTexture,
-    getLocalizedTexture,
-    onComplete,
-  } = options;
+function getAssetGetters() {
+  if (!cachedGetters) {
+    const { getAtlasTexture, getLocalizedTexture } = useFishAssetPreload();
+    cachedGetters = { getAtlasTexture, getLocalizedTexture };
+  }
+  return cachedGetters;
+}
 
-  const goldenFrameTex = getAtlasTexture(CATCH_BIG_ATLAS_URL, GOLDEN_FRAME);
-  const rgbBgTex = getAtlasTexture(CATCH_BIG_ATLAS_URL, RGB_BG_FRAME);
-  const circleBgTex = getAtlasTexture(CATCH_BIG_ATLAS_URL, CIRCLE_FRAME);
-  const bannerTex = getAtlasTexture(CATCH_BIG_ATLAS_URL, BANNER_FRAME);
+// ============================================================
+//  Fish base-scale cache (avoids repeated getLocalBounds() per fishId)
+// ============================================================
 
-  const lightTextures = LIGHT_FRAMES.map((f) =>
-    getAtlasTexture(CATCH_BIG_ATLAS_URL, f),
-  ).filter((t) => t !== PIXI.Texture.WHITE);
+const fishBaseScaleCache = new Map<number, number>();
 
-  // Guard: need at minimum the golden frame and some lights
-  if (goldenFrameTex === PIXI.Texture.WHITE || lightTextures.length === 0) {
-    console.warn("[rewardPanel] required assets not loaded");
-    onComplete?.();
-    return;
+function getFishBaseScale(fishId: number, display: PIXI.Container): number {
+  const cached = fishBaseScaleCache.get(fishId);
+  if (cached !== undefined) return cached;
+
+  const TARGET_SIZE = 250;
+  const bounds = display.getLocalBounds();
+  const naturalSize = Math.max(bounds.width, bounds.height);
+  const scale = naturalSize > 0 ? TARGET_SIZE / naturalSize : 1;
+
+  fishBaseScaleCache.set(fishId, scale);
+  return scale;
+}
+
+// ============================================================
+//  Generic sprite pools (explosion / coin / shine)
+// ============================================================
+
+function acquirePooledSprite(
+  pool: PIXI.Sprite[],
+  texture: PIXI.Texture,
+): PIXI.Sprite {
+  let sprite = pool.pop();
+  while (sprite && sprite.destroyed) sprite = pool.pop();
+
+  if (!sprite) {
+    sprite = new PIXI.Sprite(texture);
+    sprite.anchor.set(0.5);
+  } else {
+    sprite.texture = texture;
   }
 
-  //  Root container
-  const root = new PIXI.Container();
-  root.position.set(rewardX, rewardY);
-  (root as any).__isRewardEffect = true;
-  root.zIndex = 9999;
-  root.sortableChildren = true;
-  root.scale.set(0);
-  layer.addChild(root);
+  sprite.visible = true;
+  sprite.alpha = 1;
+  sprite.rotation = 0;
+  sprite.scale.set(1);
+  return sprite;
+}
 
-  //  RGB bg (z: 1)
+function releasePooledSprite(pool: PIXI.Sprite[], sprite: PIXI.Sprite | null) {
+  if (!sprite || sprite.destroyed) return;
+  if (sprite.parent) sprite.parent.removeChild(sprite);
+  sprite.visible = false;
+  pool.push(sprite);
+}
+
+const explosionPool: PIXI.Sprite[] = [];
+const coinPool: PIXI.Sprite[] = [];
+const shinePool: PIXI.Sprite[] = [];
+
+// ============================================================
+//  Reward panel pool — the whole static visual tree is built once
+//  per pooled instance and reused; only text/fish content changes.
+// ============================================================
+
+interface PanelInstance {
+  root: PIXI.Container;
+  rgbBg: PIXI.Sprite | null;
+  circleBg: PIXI.Sprite | null;
+  goldenFrame: PIXI.Sprite;
+  ballSprites: PIXI.Sprite[];
+  ballAngleOffsets: number[];
+  winAmountGroup: PIXI.Container;
+  winSprite: PIXI.Sprite | null;
+  amountLabel: PIXI.BitmapText;
+  banner: PIXI.Sprite | null;
+  nameLabel: PIXI.Text | null;
+}
+
+const panelPool: PanelInstance[] = [];
+
+function createPanelInstance(
+  cache: RewardAssetCache,
+  winTexture: PIXI.Texture,
+): PanelInstance {
+  const root = new PIXI.Container();
+  root.sortableChildren = true;
+  root.zIndex = 9999;
+  (root as any).__isRewardEffect = true;
+
   let rgbBg: PIXI.Sprite | null = null;
-  if (rgbBgTex !== PIXI.Texture.WHITE) {
-    rgbBg = new PIXI.Sprite(rgbBgTex);
+  if (cache.rgbBgTexture !== PIXI.Texture.WHITE) {
+    rgbBg = new PIXI.Sprite(cache.rgbBgTexture);
     rgbBg.anchor.set(0.5);
-    rgbBg.scale.set(0);
-    rgbBg.alpha = 0;
     rgbBg.zIndex = 1;
     root.addChild(rgbBg);
   }
 
-  //  Circle bg (z: 2)
   let circleBg: PIXI.Sprite | null = null;
-  if (circleBgTex !== PIXI.Texture.WHITE) {
-    circleBg = new PIXI.Sprite(circleBgTex);
+  if (cache.circleBgTexture !== PIXI.Texture.WHITE) {
+    circleBg = new PIXI.Sprite(cache.circleBgTexture);
     circleBg.anchor.set(0.5);
-    circleBg.scale.set(0);
-    circleBg.alpha = 0;
     circleBg.zIndex = 2;
     root.addChild(circleBg);
   }
 
-  //  Fish display (z: 11)
-  let fishHandle: FishDisplayHandle | null = null;
-  let fishDisplay: PIXI.DisplayObject | null = null;
-  let fishBaseScale = 1;
-
-  if (fishId !== undefined) {
-    const factory = createFishRendererFactory({ getAtlasTexture });
-    fishHandle = factory.createAnimatedFishBySpawnFishId(fishId);
-    fishDisplay = fishHandle?.display ?? null;
-
-    if (fishDisplay) {
-      const TARGET_SIZE = 250;
-      const bounds = (fishDisplay as PIXI.Container).getLocalBounds();
-      const naturalSize = Math.max(bounds.width, bounds.height);
-      fishBaseScale = naturalSize > 0 ? TARGET_SIZE / naturalSize : 1;
-      (fishDisplay as PIXI.Container).scale.set(0);
-      fishDisplay.alpha = 0;
-      (fishDisplay as PIXI.Container).zIndex = 11;
-      fishDisplay.position.set(0, -20);
-      root.addChild(fishDisplay);
-    }
-  }
-
-  //  Golden frame (z: 4)
-  const goldenFrame = new PIXI.Sprite(goldenFrameTex);
+  const goldenFrame = new PIXI.Sprite(cache.goldenFrameTexture);
   goldenFrame.anchor.set(0.5);
-  goldenFrame.scale.set(0);
-  goldenFrame.alpha = 0;
   goldenFrame.zIndex = 4;
   root.addChild(goldenFrame);
 
-  //  Orbiting light balls (z: 5)
-  const BALL_COUNT = lightTextures.length;
-  const ORBIT_RADIUS = 90;
-
-  const ballSprites = lightTextures.map((tex, i) => {
-    const ball = new PIXI.Sprite(tex);
+  const ballSprites: PIXI.Sprite[] = [];
+  const ballAngleOffsets: number[] = [];
+  const ballCount = cache.lightTextures.length;
+  for (let i = 0; i < ballCount; i++) {
+    const ball = new PIXI.Sprite(cache.lightTextures[i]!);
     ball.anchor.set(0.5);
-    const angle = (i / BALL_COUNT) * Math.PI * 2;
+    ball.zIndex = 5;
+    const angle = (i / ballCount) * Math.PI * 2;
     ball.position.set(
       Math.cos(angle) * ORBIT_RADIUS,
       Math.sin(angle) * ORBIT_RADIUS,
     );
-    ball.scale.set(0);
-    ball.alpha = 0;
-    ball.zIndex = 5;
+    ballAngleOffsets.push(angle);
     root.addChild(ball);
-    return ball;
-  });
+    ballSprites.push(ball);
+  }
 
-  //  WIN + amount group (z: 14)
   const winAmountGroup = new PIXI.Container();
   winAmountGroup.zIndex = 14;
-  winAmountGroup.scale.set(0);
-  winAmountGroup.alpha = 0;
   root.addChild(winAmountGroup);
 
-  const winTex = getLocalizedTexture("en", "win.png");
   let winSprite: PIXI.Sprite | null = null;
-  if (winTex !== PIXI.Texture.WHITE) {
-    winSprite = new PIXI.Sprite(winTex);
+  if (winTexture !== PIXI.Texture.WHITE) {
+    winSprite = new PIXI.Sprite(winTexture);
     winSprite.anchor.set(0, 0.5);
     winSprite.position.set(0, 35);
     winAmountGroup.addChild(winSprite);
   }
 
-  const amountLabel = new PIXI.BitmapText(`${amount.toLocaleString()}`, {
+  const amountLabel = new PIXI.BitmapText("0", {
     fontName: ODD_FONT_NAME,
     fontSize: 18,
     align: "center",
@@ -378,181 +315,522 @@ function spawnRewardPanel(options: RewardPanelOptions): void {
   amountLabel.position.set((winSprite?.width ?? 0) + 4, 0);
   winAmountGroup.addChild(amountLabel);
 
-  const groupBounds = winAmountGroup.getLocalBounds();
-  winAmountGroup.pivot.set(
-    groupBounds.x + groupBounds.width / 2,
-    groupBounds.y + groupBounds.height / 2,
-  );
-  winAmountGroup.position.set(0, 40);
-
-  //  Banner + fish name (z: 12–13)
   let banner: PIXI.Sprite | null = null;
   let nameLabel: PIXI.Text | null = null;
-
-  if (bannerTex !== PIXI.Texture.WHITE) {
-    banner = new PIXI.Sprite(bannerTex);
+  if (cache.bannerTexture !== PIXI.Texture.WHITE) {
+    banner = new PIXI.Sprite(cache.bannerTexture);
     banner.anchor.set(0.5, 0);
     banner.position.set(0, 55);
-    banner.scale.set(0);
-    banner.alpha = 0;
     banner.zIndex = 12;
     root.addChild(banner);
 
-    if (fishName) {
-      nameLabel = new PIXI.Text(fishName, {
-        fontSize: 28,
-        fill: "#ffffff",
-        fontWeight: "bold",
-        align: "center",
-        dropShadow: true,
-        dropShadowColor: "#000000",
-        dropShadowDistance: 2,
-        dropShadowBlur: 4,
-      });
-      nameLabel.anchor.set(0.5);
-      nameLabel.position.set(0, 100);
-      nameLabel.scale.set(0);
-      nameLabel.alpha = 0;
-      nameLabel.zIndex = 13;
-      root.addChild(nameLabel);
+    nameLabel = new PIXI.Text("", {
+      fontSize: 28,
+      fill: "#ffffff",
+      fontWeight: "bold",
+      align: "center",
+      dropShadow: true,
+      dropShadowColor: "#000000",
+      dropShadowDistance: 2,
+      dropShadowBlur: 4,
+    });
+    nameLabel.anchor.set(0.5);
+    nameLabel.position.set(0, 100);
+    nameLabel.zIndex = 13;
+    root.addChild(nameLabel);
+  }
+
+  return {
+    root,
+    rgbBg,
+    circleBg,
+    goldenFrame,
+    ballSprites,
+    ballAngleOffsets,
+    winAmountGroup,
+    winSprite,
+    amountLabel,
+    banner,
+    nameLabel,
+  };
+}
+
+function acquirePanel(
+  cache: RewardAssetCache,
+  winTexture: PIXI.Texture,
+): PanelInstance {
+  let panel = panelPool.pop();
+  while (panel && panel.root.destroyed) panel = panelPool.pop();
+  if (!panel) panel = createPanelInstance(cache, winTexture);
+
+  const root = panel.root;
+  root.visible = true;
+  root.alpha = 1;
+  root.rotation = 0;
+  root.scale.set(0);
+
+  if (panel.rgbBg) {
+    panel.rgbBg.scale.set(0);
+    panel.rgbBg.alpha = 0;
+    panel.rgbBg.rotation = 0;
+  }
+  if (panel.circleBg) {
+    panel.circleBg.scale.set(0);
+    panel.circleBg.alpha = 0;
+    panel.circleBg.rotation = 0;
+  }
+
+  panel.goldenFrame.scale.set(0);
+  panel.goldenFrame.alpha = 0;
+  panel.goldenFrame.rotation = 0;
+
+  for (const ball of panel.ballSprites) {
+    ball.scale.set(0);
+    ball.alpha = 0;
+  }
+
+  panel.winAmountGroup.scale.set(0);
+  panel.winAmountGroup.alpha = 0;
+
+  if (panel.winSprite) panel.winSprite.texture = winTexture;
+
+  if (panel.banner) {
+    panel.banner.scale.set(0);
+    panel.banner.alpha = 0;
+  }
+  if (panel.nameLabel) {
+    panel.nameLabel.scale.set(0);
+    panel.nameLabel.alpha = 0;
+  }
+
+  return panel;
+}
+
+function releasePanel(panel: PanelInstance) {
+  if (panel.root.destroyed) return;
+  if (panel.root.parent) panel.root.parent.removeChild(panel.root);
+  panel.root.visible = false;
+  panelPool.push(panel);
+}
+
+// ============================================================
+//  Reward effect state machine
+// ============================================================
+
+type EffectPhase = "explosion" | "shine" | "panel" | "done";
+
+interface ExplosionRuntime {
+  sprite: PIXI.Sprite;
+  frameProgress: number;
+  peaked: boolean;
+  finished: boolean;
+}
+
+interface CoinRuntime {
+  sprite: PIXI.Sprite;
+  elapsed: number;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+}
+
+interface ShineRuntime {
+  sprite: PIXI.Sprite;
+  elapsed: number;
+}
+
+interface PanelRuntime {
+  panel: PanelInstance;
+  elapsed: number;
+  pulseT: number;
+  frameSpinT: number;
+  orbitAngle: number;
+  exitStarted: boolean;
+  holdMs: number;
+  fishDisplay: PIXI.DisplayObject | null;
+  fishHandle: FishDisplayHandle | null;
+  fishBaseScale: number;
+}
+
+interface RewardEffectState {
+  layer: PIXI.Container;
+  x: number;
+  y: number;
+  rewardX: number;
+  rewardY: number;
+  amount: number;
+  fishName: string;
+  fishId?: number;
+  durationMs: number;
+  onComplete?: () => void;
+
+  phase: EffectPhase;
+  completed: boolean;
+
+  explosion: ExplosionRuntime | null;
+  coin: CoinRuntime | null;
+  shine: ShineRuntime | null;
+  panel: PanelRuntime | null;
+}
+
+const activeEffects: RewardEffectState[] = [];
+let managerRunning = false;
+
+function ensureManagerRunning() {
+  if (managerRunning) return;
+  managerRunning = true;
+  PIXI.Ticker.shared.add(updateRewardEffects);
+}
+
+// Single centralized ticker for ALL reward effects, regardless of count.
+function updateRewardEffects() {
+  if (activeEffects.length === 0) return;
+
+  const dt = PIXI.Ticker.shared.elapsedMS;
+
+  for (let i = activeEffects.length - 1; i >= 0; i--) {
+    const eff = activeEffects[i]!;
+    updateEffect(eff, dt);
+    if (eff.phase === "done") {
+      activeEffects.splice(i, 1);
+    }
+  }
+}
+
+function finishEffect(eff: RewardEffectState) {
+  if (eff.completed) return;
+  eff.completed = true;
+  eff.phase = "done";
+  eff.onComplete?.();
+}
+
+function startCoin(eff: RewardEffectState) {
+  const cache = assetCache!;
+  if (eff.layer.destroyed) {
+    finishEffect(eff);
+    return;
+  }
+  if (cache.coinTexture === PIXI.Texture.WHITE) {
+    startShine(eff);
+    return;
+  }
+
+  const sprite = acquirePooledSprite(coinPool, cache.coinTexture);
+  sprite.position.set(eff.x, eff.y);
+  sprite.zIndex = 9999;
+  eff.layer.sortableChildren = true;
+  eff.layer.addChild(sprite);
+
+  eff.coin = {
+    sprite,
+    elapsed: 0,
+    fromX: eff.x,
+    fromY: eff.y,
+    toX: eff.rewardX,
+    toY: eff.rewardY,
+  };
+}
+
+function startShine(eff: RewardEffectState) {
+  eff.phase = "shine";
+
+  const cache = assetCache!;
+  if (eff.layer.destroyed) {
+    finishEffect(eff);
+    return;
+  }
+  if (cache.shineTexture === PIXI.Texture.WHITE) {
+    startPanel(eff);
+    return;
+  }
+
+  const sprite = acquirePooledSprite(shinePool, cache.shineTexture);
+  sprite.position.set(eff.rewardX, eff.rewardY);
+  sprite.scale.set(0);
+  sprite.zIndex = 9998;
+  eff.layer.sortableChildren = true;
+  eff.layer.addChild(sprite);
+
+  eff.shine = { sprite, elapsed: 0 };
+}
+
+function startPanel(eff: RewardEffectState) {
+  eff.phase = "panel";
+
+  const cache = assetCache!;
+  if (eff.layer.destroyed) {
+    finishEffect(eff);
+    return;
+  }
+
+  const { getAtlasTexture, getLocalizedTexture } = getAssetGetters();
+  const winTexture = resolveWinTexture("en", getLocalizedTexture);
+
+  if (
+    cache.goldenFrameTexture === PIXI.Texture.WHITE ||
+    cache.lightTextures.length === 0
+  ) {
+    console.warn("[rewardPanel] required assets not loaded");
+    finishEffect(eff);
+    return;
+  }
+
+  const panel = acquirePanel(cache, winTexture);
+  panel.root.position.set(eff.rewardX, eff.rewardY);
+  eff.layer.sortableChildren = true;
+  eff.layer.addChild(panel.root);
+
+  panel.amountLabel.text = `${eff.amount.toLocaleString()}`;
+  const groupBounds = panel.winAmountGroup.getLocalBounds();
+  panel.winAmountGroup.pivot.set(
+    groupBounds.x + groupBounds.width / 2,
+    groupBounds.y + groupBounds.height / 2,
+  );
+  panel.winAmountGroup.position.set(0, 40);
+
+  if (panel.nameLabel) panel.nameLabel.text = eff.fishName;
+
+  let fishHandle: FishDisplayHandle | null = null;
+  let fishDisplay: PIXI.DisplayObject | null = null;
+  let fishBaseScale = 1;
+
+  if (eff.fishId !== undefined) {
+    const factory = createFishRendererFactory({ getAtlasTexture });
+    fishHandle = factory.createAnimatedFishBySpawnFishId(eff.fishId);
+    fishDisplay = fishHandle?.display ?? null;
+
+    if (fishDisplay) {
+      fishBaseScale = getFishBaseScale(
+        eff.fishId,
+        fishDisplay as PIXI.Container,
+      );
+      (fishDisplay as PIXI.Container).scale.set(0);
+      fishDisplay.alpha = 0;
+      (fishDisplay as PIXI.Container).zIndex = 11;
+      fishDisplay.position.set(0, -20);
+      panel.root.addChild(fishDisplay);
     }
   }
 
-  //  Ticker animation
-  const INTRO_MS = 420;
-  const EXIT_MS = 320;
-  const holdMs = durationMs * 0.65;
-
-  let elapsed = 0;
-  let pulseT = 0;
-  let frameSpinT = 0;
-  let orbitAngle = 0;
-  let exitStarted = false;
-
-  const onTick = () => {
-    if (root.destroyed) {
-      PIXI.Ticker.shared.remove(onTick);
-      return;
-    }
-
-    const dt = PIXI.Ticker.shared.elapsedMS;
-    elapsed += dt;
-    pulseT += dt * 0.003;
-    frameSpinT += dt * 0.0008;
-    orbitAngle += dt * 0.006;
-
-    const introT = Math.min(elapsed / INTRO_MS, 1);
-
-    // Root pop-in
-    if (!exitStarted) root.scale.set(easeOutBack(introT) * REWARD_PANEL_SCALE);
-
-    // RGB bg — spins clockwise
-    if (rgbBg && !rgbBg.destroyed) {
-      const t = Math.min(elapsed / 300, 1);
-      rgbBg.scale.set(easeOutBack(t));
-      rgbBg.alpha = Math.min(1, t * 2);
-      rgbBg.rotation += dt * 0.0015;
-    }
-
-    // Circle bg — counter-rotates
-    if (circleBg && !circleBg.destroyed) {
-      const t = Math.min(elapsed / 300, 1);
-      circleBg.scale.set(easeOutBack(t));
-      circleBg.alpha = Math.min(1, t * 2);
-      circleBg.rotation -= dt * 0.0006;
-    }
-
-    // Fish
-    if (fishDisplay && !(fishDisplay as any).destroyed) {
-      const t = Math.min((elapsed - 60) / 320, 1);
-      if (t > 0) {
-        (fishDisplay as PIXI.Container).scale?.set(
-          easeOutBack(t) * fishBaseScale,
-        );
-        fishDisplay.alpha = Math.min(1, t * 2);
-      }
-    }
-
-    // Golden frame — slow spin after intro
-    if (!goldenFrame.destroyed) {
-      const t = Math.min((elapsed - 80) / 360, 1);
-      if (t > 0) {
-        goldenFrame.scale.set(easeOutBack(t));
-        goldenFrame.alpha = Math.min(1, t * 2);
-      }
-      if (introT >= 1) goldenFrame.rotation = frameSpinT;
-    }
-
-    // Orbiting light balls
-    ballSprites.forEach((ball, i) => {
-      if (ball.destroyed) return;
-      const delay = 120 + i * 30;
-      const popT = Math.min((elapsed - delay) / 280, 1);
-      if (popT <= 0) return;
-
-      const angle = orbitAngle + (i / BALL_COUNT) * Math.PI * 2;
-      ball.position.set(
-        Math.cos(angle) * ORBIT_RADIUS,
-        Math.sin(angle) * ORBIT_RADIUS,
-      );
-
-      if (popT < 1) {
-        ball.scale.set(easeOutBack(popT) * 0.5);
-        ball.alpha = Math.min(1, popT * 2);
-      } else {
-        ball.alpha = 1;
-        ball.scale.set(0.5 * (1 + Math.sin(pulseT * 3 + i * 0.8) * 0.12));
-      }
-    });
-
-    // WIN + amount
-    if (!winAmountGroup.destroyed) {
-      const t = Math.min((elapsed - 200) / 320, 1);
-      if (t > 0) {
-        winAmountGroup.scale.set(easeOutBack(t));
-        winAmountGroup.alpha = Math.min(1, t * 2);
-      }
-    }
-
-    // Banner
-    if (banner && !banner.destroyed) {
-      const t = Math.min((elapsed - 300) / 350, 1);
-      if (t > 0) {
-        banner.scale.set(easeOutBack(t));
-        banner.alpha = Math.min(1, t * 2);
-      }
-    }
-
-    // Fish name
-    if (nameLabel && !nameLabel.destroyed) {
-      const t = Math.min((elapsed - 380) / 280, 1);
-      if (t > 0) {
-        nameLabel.scale.set(easeOut(t));
-        nameLabel.alpha = Math.min(1, t * 2);
-      }
-    }
-
-    // Exit
-    if (!exitStarted && elapsed > holdMs) exitStarted = true;
-
-    if (exitStarted) {
-      const exitT = Math.min((elapsed - holdMs) / EXIT_MS, 1);
-      root.scale.set(Math.max(0, 1 - easeInBack(exitT)) * REWARD_PANEL_SCALE);
-
-      if (exitT >= 1) {
-        PIXI.Ticker.shared.remove(onTick);
-        root.parent?.removeChild(root);
-        root.destroy({ children: true });
-        fishHandle?.destroy();
-        onComplete?.();
-      }
-    }
+  eff.panel = {
+    panel,
+    elapsed: 0,
+    pulseT: 0,
+    frameSpinT: 0,
+    orbitAngle: 0,
+    exitStarted: false,
+    holdMs: eff.durationMs * 0.65,
+    fishDisplay,
+    fishHandle,
+    fishBaseScale,
   };
-
-  PIXI.Ticker.shared.add(onTick);
 }
 
+function updateExplosion(eff: RewardEffectState, dt: number) {
+  const ex = eff.explosion;
+  if (!ex || ex.finished) return;
+
+  const cache = assetCache!;
+  const frames = cache.explosionTextures;
+  const frameCount = frames.length;
+
+  ex.frameProgress += (dt / 1000) * EXPLOSION_FPS_BASE * EXPLOSION_ANIM_SPEED;
+  const frameIndex = Math.min(Math.floor(ex.frameProgress), frameCount - 1);
+
+  const nextTexture = frames[frameIndex]!;
+  if (ex.sprite.texture !== nextTexture) ex.sprite.texture = nextTexture;
+
+  const peakFrame = Math.floor(frameCount * 0.45);
+  if (!ex.peaked && frameIndex >= peakFrame) {
+    ex.peaked = true;
+    startCoin(eff);
+  }
+
+  if (ex.frameProgress >= frameCount) {
+    ex.finished = true;
+    if (!ex.peaked) {
+      ex.peaked = true;
+      startCoin(eff);
+    }
+    releasePooledSprite(explosionPool, ex.sprite);
+    eff.explosion = null;
+  }
+}
+
+function updateCoin(eff: RewardEffectState, dt: number) {
+  const coin = eff.coin;
+  if (!coin) return;
+
+  coin.elapsed += dt;
+  const t = Math.min(coin.elapsed / FLY_MS, 1);
+  const et = easeOut(t);
+
+  const sprite = coin.sprite;
+  sprite.x = coin.fromX + (coin.toX - coin.fromX) * et;
+  sprite.y = coin.fromY + (coin.toY - coin.fromY) * et;
+  sprite.rotation += dt * 0.003;
+
+  if (t > 0.75) sprite.alpha = 1 - (t - 0.75) / 0.25;
+
+  if (t >= 1) {
+    releasePooledSprite(coinPool, sprite);
+    eff.coin = null;
+    startShine(eff);
+  }
+}
+
+function updateShine(eff: RewardEffectState, dt: number) {
+  const shine = eff.shine;
+  if (!shine) return;
+
+  shine.elapsed += dt;
+  const t = Math.min(shine.elapsed / SHINE_MS, 1);
+
+  const sprite = shine.sprite;
+  sprite.scale.set(easeOut(t) * 2.5);
+  sprite.alpha = t < 0.4 ? 1 : 1 - (t - 0.4) / 0.6;
+  sprite.rotation += dt * 0.004;
+
+  if (t >= 1) {
+    releasePooledSprite(shinePool, sprite);
+    eff.shine = null;
+    startPanel(eff);
+  }
+}
+
+function updatePanel(eff: RewardEffectState, dt: number) {
+  const p = eff.panel;
+  if (!p) return;
+
+  const panel = p.panel;
+  const root = panel.root;
+
+  if (root.destroyed) {
+    finishEffect(eff);
+    return;
+  }
+
+  p.elapsed += dt;
+  p.pulseT += dt * 0.003;
+  p.frameSpinT += dt * 0.0008;
+  p.orbitAngle += dt * 0.006;
+
+  const introT = Math.min(p.elapsed / INTRO_MS, 1);
+
+  if (!p.exitStarted) root.scale.set(easeOutBack(introT) * REWARD_PANEL_SCALE);
+
+  if (panel.rgbBg && !panel.rgbBg.destroyed) {
+    const t = Math.min(p.elapsed / 300, 1);
+    panel.rgbBg.scale.set(easeOutBack(t));
+    panel.rgbBg.alpha = Math.min(1, t * 2);
+    panel.rgbBg.rotation += dt * 0.0015;
+  }
+
+  if (panel.circleBg && !panel.circleBg.destroyed) {
+    const t = Math.min(p.elapsed / 300, 1);
+    panel.circleBg.scale.set(easeOutBack(t));
+    panel.circleBg.alpha = Math.min(1, t * 2);
+    panel.circleBg.rotation -= dt * 0.0006;
+  }
+
+  if (p.fishDisplay && !(p.fishDisplay as any).destroyed) {
+    const t = Math.min((p.elapsed - 60) / 320, 1);
+    if (t > 0) {
+      (p.fishDisplay as PIXI.Container).scale?.set(
+        easeOutBack(t) * p.fishBaseScale,
+      );
+      p.fishDisplay.alpha = Math.min(1, t * 2);
+    }
+  }
+
+  if (!panel.goldenFrame.destroyed) {
+    const t = Math.min((p.elapsed - 80) / 360, 1);
+    if (t > 0) {
+      panel.goldenFrame.scale.set(easeOutBack(t));
+      panel.goldenFrame.alpha = Math.min(1, t * 2);
+    }
+    if (introT >= 1) panel.goldenFrame.rotation = p.frameSpinT;
+  }
+
+  const ballCount = panel.ballSprites.length;
+  for (let i = 0; i < ballCount; i++) {
+    const ball = panel.ballSprites[i]!;
+    if (ball.destroyed) continue;
+
+    const delay = 120 + i * 30;
+    const popT = Math.min((p.elapsed - delay) / 280, 1);
+    if (popT <= 0) continue;
+
+    const angle = p.orbitAngle + panel.ballAngleOffsets[i]!;
+    ball.position.set(
+      Math.cos(angle) * ORBIT_RADIUS,
+      Math.sin(angle) * ORBIT_RADIUS,
+    );
+
+    if (popT < 1) {
+      ball.scale.set(easeOutBack(popT) * 0.5);
+      ball.alpha = Math.min(1, popT * 2);
+    } else {
+      ball.alpha = 1;
+      ball.scale.set(0.5 * (1 + Math.sin(p.pulseT * 3 + i * 0.8) * 0.12));
+    }
+  }
+
+  if (!panel.winAmountGroup.destroyed) {
+    const t = Math.min((p.elapsed - 200) / 320, 1);
+    if (t > 0) {
+      panel.winAmountGroup.scale.set(easeOutBack(t));
+      panel.winAmountGroup.alpha = Math.min(1, t * 2);
+    }
+  }
+
+  if (panel.banner && !panel.banner.destroyed) {
+    const t = Math.min((p.elapsed - 300) / 350, 1);
+    if (t > 0) {
+      panel.banner.scale.set(easeOutBack(t));
+      panel.banner.alpha = Math.min(1, t * 2);
+    }
+  }
+
+  if (panel.nameLabel && !panel.nameLabel.destroyed) {
+    const t = Math.min((p.elapsed - 380) / 280, 1);
+    if (t > 0) {
+      panel.nameLabel.scale.set(easeOut(t));
+      panel.nameLabel.alpha = Math.min(1, t * 2);
+    }
+  }
+
+  if (!p.exitStarted && p.elapsed > p.holdMs) p.exitStarted = true;
+
+  if (p.exitStarted) {
+    const exitT = Math.min((p.elapsed - p.holdMs) / EXIT_MS, 1);
+    root.scale.set(Math.max(0, 1 - easeInBack(exitT)) * REWARD_PANEL_SCALE);
+
+    if (exitT >= 1) {
+      if (p.fishDisplay && panel.root.children.includes(p.fishDisplay)) {
+        panel.root.removeChild(p.fishDisplay);
+      }
+      p.fishHandle?.destroy();
+
+      releasePanel(panel);
+      eff.panel = null;
+      finishEffect(eff);
+    }
+  }
+}
+
+function updateEffect(eff: RewardEffectState, dt: number) {
+  if (eff.explosion) updateExplosion(eff, dt);
+  if (eff.coin) updateCoin(eff, dt);
+  if (eff.shine) updateShine(eff, dt);
+  if (eff.panel) updatePanel(eff, dt);
+}
+
+// ============================================================
 //  Public entry point
+// ============================================================
+
 export function showFishMissRewardEffect(options: FishMissRewardOptions): void {
   const {
     layer,
@@ -567,25 +845,83 @@ export function showFishMissRewardEffect(options: FishMissRewardOptions): void {
     onComplete,
   } = options;
 
-  const { getAtlasTexture, getLocalizedTexture } = useFishAssetPreload();
+  if (layer.destroyed) {
+    onComplete?.();
+    return;
+  }
 
-  // Sequence: explosion → coin fly → shine → reward panel
-  playExplosion(layer, x, y, getAtlasTexture, () => {
-    playCoinFly(layer, x, y, rewardX, rewardY, getAtlasTexture, () => {
-      playShine(layer, rewardX, rewardY, getAtlasTexture, () => {
-        spawnRewardPanel({
-          layer,
-          rewardX,
-          rewardY,
-          amount,
-          fishName,
-          fishId,
-          durationMs,
-          getAtlasTexture,
-          getLocalizedTexture,
-          onComplete,
-        });
-      });
-    });
-  });
+  const { getAtlasTexture } = getAssetGetters();
+  const cache = resolveAssetCache(getAtlasTexture);
+
+  const eff: RewardEffectState = {
+    layer,
+    x,
+    y,
+    rewardX,
+    rewardY,
+    amount,
+    fishName,
+    fishId,
+    durationMs,
+    onComplete,
+    phase: "explosion",
+    completed: false,
+    explosion: null,
+    coin: null,
+    shine: null,
+    panel: null,
+  };
+
+  if (cache.explosionTextures.length === 0) {
+    // No explosion frames available — skip straight to coin.
+    startCoin(eff);
+  } else {
+    const sprite = acquirePooledSprite(
+      explosionPool,
+      cache.explosionTextures[0]!,
+    );
+    sprite.position.set(x, y);
+    sprite.scale.set(1.4);
+    sprite.zIndex = 9998;
+    layer.sortableChildren = true;
+    layer.addChild(sprite);
+
+    eff.explosion = {
+      sprite,
+      frameProgress: 0,
+      peaked: false,
+      finished: false,
+    };
+  }
+
+  activeEffects.push(eff);
+  ensureManagerRunning();
+}
+
+// ============================================================
+//  Teardown helper — call on scene/game destroy while effects
+//  may still be active, to avoid orphaned ticker work or leaks.
+// ============================================================
+
+export function disposeFishMissRewardEffects(): void {
+  for (const eff of activeEffects) {
+    if (eff.explosion) releasePooledSprite(explosionPool, eff.explosion.sprite);
+    if (eff.coin) releasePooledSprite(coinPool, eff.coin.sprite);
+    if (eff.shine) releasePooledSprite(shinePool, eff.shine.sprite);
+    if (eff.panel) {
+      const p = eff.panel;
+      if (p.fishDisplay && p.panel.root.children.includes(p.fishDisplay)) {
+        p.panel.root.removeChild(p.fishDisplay);
+      }
+      p.fishHandle?.destroy();
+      releasePanel(p.panel);
+    }
+    finishEffect(eff);
+  }
+  activeEffects.length = 0;
+
+  if (managerRunning) {
+    PIXI.Ticker.shared.remove(updateRewardEffects);
+    managerRunning = false;
+  }
 }

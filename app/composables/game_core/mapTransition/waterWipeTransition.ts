@@ -106,10 +106,11 @@ function makeHorizontalGradientSprite(
 function spawnBubble(
   container: PIXI.Container,
   bubbles: BubbleSprite[],
+  texture: PIXI.Texture,
   edgeX: number,
   H: number,
 ): void {
-  const sprite = makeSprite("particle/bubble.png");
+  const sprite = new PIXI.Sprite(texture);
   const scale = 0.35 + Math.random() * 0.55;
   sprite.anchor.set(0.5);
   sprite.scale.set(scale);
@@ -133,10 +134,11 @@ function tickBubbles(
   bubbles: BubbleSprite[],
   container: PIXI.Container,
   edgeDeltaX: number,
+  deltaScale: number,
 ): void {
   for (let i = bubbles.length - 1; i >= 0; i--) {
     const b = bubbles[i]!;
-    b.life += 1 / 60;
+    b.life += deltaScale / 60;
     const bT = b.life / b.maxLife;
     if (bT >= 1 || b.sprite.y < -70) {
       container.removeChild(b.sprite);
@@ -144,8 +146,8 @@ function tickBubbles(
       bubbles.splice(i, 1);
     } else {
       const followPush = Math.max(0, edgeDeltaX) * b.followFactor;
-      b.sprite.x += b.vx + followPush;
-      b.sprite.y += b.vy;
+      b.sprite.x += (b.vx + followPush) * deltaScale;
+      b.sprite.y += b.vy * deltaScale;
       if (bT < 0.15) b.sprite.alpha = (bT / 0.15) * 0.9;
       else if (bT < 0.65) b.sprite.alpha = 0.9;
       else b.sprite.alpha = (1 - (bT - 0.65) / 0.35) * 0.9;
@@ -303,6 +305,7 @@ export async function runWaterWipeTransition(
 
   const bubbles: BubbleSprite[] = [];
   const bubbleContainer = new PIXI.Container();
+  const bubbleTexture = getEffectTexture("particle/bubble.png");
   fxContainer.addChild(bubbleContainer);
 
   // ── Layer order ────────────────────────────────────────────────────────────
@@ -342,6 +345,7 @@ export async function runWaterWipeTransition(
   const tick = () => {
     const now = performance.now();
     const elapsed = now - startTime;
+    const deltaScale = ticker.deltaMS / (1000 / 60);
     const t = Math.min(elapsed / TOTAL_DURATION, 1);
 
     // ── Phase 0: banner zooms from large → normal size (0 → T0) ──────────────
@@ -417,13 +421,13 @@ export async function runWaterWipeTransition(
       waveSprite.alpha = entryFade * travelFade;
 
       if (now - lastBubbleTime > 75 && edgeX > 0 && edgeX < W) {
-        spawnBubble(bubbleContainer, bubbles, edgeX, H);
+        spawnBubble(bubbleContainer, bubbles, bubbleTexture, edgeX, H);
         if (Math.random() > 0.3)
-          spawnBubble(bubbleContainer, bubbles, edgeX, H);
+          spawnBubble(bubbleContainer, bubbles, bubbleTexture, edgeX, H);
         lastBubbleTime = now;
       }
 
-      tickBubbles(bubbles, bubbleContainer, edgeDeltaX);
+      tickBubbles(bubbles, bubbleContainer, edgeDeltaX, deltaScale);
       lastEdgeX = edgeX;
       return;
     }
@@ -442,7 +446,7 @@ export async function runWaterWipeTransition(
     waveSprite.position.set(wipeEndX, 0);
     waveSprite.alpha = Math.max(0, 1 - brightenT * 3);
 
-    tickBubbles(bubbles, bubbleContainer, 0);
+    tickBubbles(bubbles, bubbleContainer, 0, deltaScale);
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
     if (t >= 1) {

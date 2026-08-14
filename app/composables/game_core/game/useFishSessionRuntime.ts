@@ -5,6 +5,7 @@ import {
   type SessionPayload,
 } from "~/composables/service/sessionApi";
 import { createBet } from "~/composables/service/betApi";
+// import { createBetRuntime as createBet } from "~/composables/service/betWs";
 
 type SnapshotProducer = () => {
   total_elapsed_seconds: string;

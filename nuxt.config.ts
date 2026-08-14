@@ -16,10 +16,12 @@ export default defineNuxtConfig({
     enabled: true,
   },
 
-  modules: [
-    "@pinia/nuxt",
-    "@nuxtjs/google-fonts",
-  ],
+  devServer: {
+    port: 3001,
+    host: "0.0.0.0",
+  },
+
+  modules: ["@pinia/nuxt", "@nuxtjs/google-fonts"],
 
   /* =====================================================
    * APP / PWA / MOBILE SAFARI
@@ -54,8 +56,7 @@ export default defineNuxtConfig({
          * Safari status bar
          */
         {
-          name:
-            "apple-mobile-web-app-status-bar-style",
+          name: "apple-mobile-web-app-status-bar-style",
           content: "black-translucent",
         },
 
@@ -92,19 +93,14 @@ export default defineNuxtConfig({
    * GLOBAL CSS
    * ===================================================== */
 
-  css: [
-    "~/assets/css/main.css",
-  ],
+  css: ["~/assets/css/main.css"],
 
   /* =====================================================
    * VUETIFY
    * ===================================================== */
 
   build: {
-    transpile: [
-      "vuetify",
-      "vue-sonner",
-    ],
+    transpile: ["vuetify", "vue-sonner"],
   },
 
   /* =====================================================
@@ -121,9 +117,7 @@ export default defineNuxtConfig({
     ],
 
     ssr: {
-      noExternal: [
-        "vuetify",
-      ],
+      noExternal: ["vuetify"],
     },
   },
 
@@ -133,17 +127,13 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      apiEndPoint:
-        process.env.NUXT_PUBLIC_API_ENDPOINT,
+      apiEndPoint: process.env.NUXT_PUBLIC_API_ENDPOINT,
 
-      locale:
-        process.env.NUXT_PUBLIC_APP_DEFAULT_LANGUAGE,
+      locale: process.env.NUXT_PUBLIC_APP_DEFAULT_LANGUAGE,
 
-      baseURL:
-        process.env.NUXT_PUBLIC_BASE_URL,
+      baseURL: process.env.NUXT_PUBLIC_BASE_URL,
 
-      websocket:
-        process.env.NUXT_WEBSOCKET_URL,
+      websocket: process.env.NUXT_WEBSOCKET_URL,
     },
   },
 
@@ -159,18 +149,9 @@ export default defineNuxtConfig({
     base64: true,
 
     families: {
-      Battambang: [
-        400,
-        700,
-      ],
+      Battambang: [400, 700],
 
-      Poppins: [
-        300,
-        400,
-        500,
-        600,
-        700,
-      ],
+      Poppins: [300, 400, 500, 600, 700],
     },
 
     download: true,

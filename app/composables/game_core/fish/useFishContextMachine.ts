@@ -162,7 +162,7 @@ const CONTEXT_SWITCH_LEAD_MS = 2200;
 const TIME_SCALE = 1.0;
 const HEADING_OFFSET = Math.PI / 2;
 const SPINE_MAX_TILT = Math.PI * 0.38;
-const DEBUG_CONTEXT = true;
+const DEBUG_CONTEXT = false;
 const USE_WEIGHTED_GROUP = false;
 const NORMAL_SCENES = ["bg1", "bg2", "bg3"] as const;
 const BOSS_SCENE_BY_FISH_ID: Record<number, string> = {
@@ -170,6 +170,48 @@ const BOSS_SCENE_BY_FISH_ID: Record<number, string> = {
   19: "phoenix",
   21: "naga",
 };
+
+const SCRATCH_POINT = { x: 0, y: 0 };
+const SCRATCH_TANGENT = { dx: 0, dy: 0 };
+const REVERSE_FACING_FISH_IDS = new Set([18, 19]);
+
+function bezierPointInto(
+  p0: PIXI.Point,
+  p1: PIXI.Point,
+  p2: PIXI.Point,
+  p3: PIXI.Point,
+  t: number,
+  out: { x: number; y: number },
+) {
+  const inv = 1 - t;
+  const a = inv * inv * inv;
+  const b = 3 * inv * inv * t;
+  const c = 3 * inv * t * t;
+  const d = t * t * t;
+  out.x = a * p0.x + b * p1.x + c * p2.x + d * p3.x;
+  out.y = a * p0.y + b * p1.y + c * p2.y + d * p3.y;
+  return out;
+}
+
+function bezierTangentInto(
+  p0: PIXI.Point,
+  p1: PIXI.Point,
+  p2: PIXI.Point,
+  p3: PIXI.Point,
+  t: number,
+  out: { dx: number; dy: number },
+) {
+  const inv = 1 - t;
+  out.dx =
+    3 * inv * inv * (p1.x - p0.x) +
+    6 * inv * t * (p2.x - p1.x) +
+    3 * t * t * (p3.x - p2.x);
+  out.dy =
+    3 * inv * inv * (p1.y - p0.y) +
+    6 * inv * t * (p2.y - p1.y) +
+    3 * t * t * (p3.y - p2.y);
+  return out;
+}
 
 const pathRoot = pathData as PathRoot;
 
@@ -472,6 +514,38 @@ function bezierTangent(
   return { dx, dy };
 }
 
+// function buildSpawnEvents(groupId: number): {
+//   events: SpawnEvent[];
+//   bossCount: number;
+// } {
+//   const group = groupMap.get(groupId);
+//   if (!group) return { events: [], bossCount: 0 };
+
+//   const filtered = group.fish
+//     .filter((entry) => getPathPoints(entry.path) !== null)
+//     .sort((a, b) => (a.delay ?? 0) - (b.delay ?? 0))
+//     .slice(0, MAX_SPAWN_PER_GROUP);
+
+//   if (filtered.length === 0) return { events: [], bossCount: 0 };
+
+//   const firstDelay = Math.min(...filtered.map((entry) => entry.delay ?? 0));
+//   let bossCount = 0;
+
+//   const events = filtered.map((entry) => {
+//     const isBoss = Boolean(BOSS_SCENE_BY_FISH_ID[entry.fish]);
+//     if (isBoss) bossCount += 1;
+//     return {
+//       fishId: entry.fish,
+//       pathId: entry.path,
+//       delayMs: ((entry.delay ?? 0) - firstDelay) * 1000 * TIME_SCALE,
+//       renderable: getRenderableFishIds().has(entry.fish),
+//       isBoss,
+//     };
+//   });
+
+//   return { events, bossCount };
+// }
+
 function buildSpawnEvents(groupId: number): {
   events: SpawnEvent[];
   bossCount: number;
@@ -487,6 +561,7 @@ function buildSpawnEvents(groupId: number): {
   if (filtered.length === 0) return { events: [], bossCount: 0 };
 
   const firstDelay = Math.min(...filtered.map((entry) => entry.delay ?? 0));
+  const renderableFishIds = getRenderableFishIds(); // ← computed once, not per entry
   let bossCount = 0;
 
   const events = filtered.map((entry) => {
@@ -496,7 +571,7 @@ function buildSpawnEvents(groupId: number): {
       fishId: entry.fish,
       pathId: entry.path,
       delayMs: ((entry.delay ?? 0) - firstDelay) * 1000 * TIME_SCALE,
-      renderable: getRenderableFishIds().has(entry.fish),
+      renderable: renderableFishIds.has(entry.fish),
       isBoss,
     };
   });
@@ -542,6 +617,125 @@ export function createFishContextMachine(options: {
   const initialRuntimeState = options.initialRuntimeState ?? null;
   let pausedAtMs: number | null = null;
 
+  // ── Kill animation: centralized manager (one ticker for all active kills) ──
+  interface KillAnimState {
+    obj: PIXI.Container;
+    anim:
+      | PIXI.AnimatedSprite
+      | (PIXI.DisplayObject & { state?: any; autoUpdate?: boolean })
+      | undefined;
+    isAnimatedSprite: boolean;
+    isSpine: boolean;
+    startX: number;
+    startY: number;
+    startRot: number;
+    startAlpha: number;
+    elapsed: number;
+    cleanup: () => void;
+  }
+
+  const activeKillAnims: KillAnimState[] = [];
+
+  const KILL_SHOCK_MS = 90;
+  const KILL_DROP_MS = 210;
+  const KILL_PANIC_MS = 260;
+  const KILL_FADE_MS = 240;
+  const KILL_TOTAL_MS =
+    KILL_SHOCK_MS + KILL_DROP_MS + KILL_PANIC_MS + KILL_FADE_MS;
+  const KILL_SHOCK_LIFT = 18;
+  const KILL_BOUNCE_DEPTH = 6;
+
+  const killEaseOut = (t: number) => 1 - Math.pow(1 - t, 3);
+  const killEaseInOut = (t: number) =>
+    t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+  function updateKillAnimations() {
+    if (activeKillAnims.length === 0) return;
+    const dt = PIXI.Ticker.shared.elapsedMS;
+
+    for (let i = activeKillAnims.length - 1; i >= 0; i--) {
+      const state = activeKillAnims[i]!;
+      const obj = state.obj;
+
+      if (obj.destroyed) {
+        state.cleanup();
+        activeKillAnims.splice(i, 1);
+        continue;
+      }
+
+      state.elapsed += dt;
+      const elapsed = state.elapsed;
+
+      // Phase 1 — shock
+      if (elapsed <= KILL_SHOCK_MS) {
+        const t = Math.min(elapsed / KILL_SHOCK_MS, 1);
+        obj.x = state.startX + Math.sin(t * Math.PI * 5) * 5 * (1 - t * 0.35);
+        obj.y = state.startY - KILL_SHOCK_LIFT * killEaseOut(t);
+        obj.rotation =
+          state.startRot + Math.sin(t * Math.PI * 4) * 0.08 * (1 - t);
+        obj.alpha = state.startAlpha;
+        continue;
+      }
+
+      // Phase 2 — drop
+      if (elapsed <= KILL_SHOCK_MS + KILL_DROP_MS) {
+        const t = Math.min((elapsed - KILL_SHOCK_MS) / KILL_DROP_MS, 1);
+        obj.x = state.startX + Math.sin(t * Math.PI * 6) * 1.5 * (1 - t);
+        if (t < 0.78) {
+          obj.y =
+            state.startY -
+            KILL_SHOCK_LIFT +
+            (KILL_SHOCK_LIFT + KILL_BOUNCE_DEPTH) * killEaseInOut(t / 0.78);
+        } else {
+          obj.y =
+            state.startY +
+            KILL_BOUNCE_DEPTH * (1 - killEaseOut((t - 0.78) / 0.22));
+        }
+        obj.rotation =
+          state.startRot + Math.sin(t * Math.PI * 3) * 0.04 * (1 - t);
+        obj.alpha = state.startAlpha;
+        continue;
+      }
+
+      // Phase 3 & 4 — panic wiggle, then fade
+      const panicElapsed = elapsed - KILL_SHOCK_MS - KILL_DROP_MS;
+      const wave = panicElapsed * 0.07;
+      obj.x = state.startX + Math.sin(wave * 2.6) * 4;
+      obj.y = state.startY + Math.sin(wave) * 2;
+      obj.rotation = state.startRot + Math.sin(wave * 1.8) * 0.05;
+
+      if (state.anim && !(state.anim as any).destroyed) {
+        const targetSpeed = Math.max(
+          2.4,
+          ((obj as any).__walkAnimSpeed ?? 1) * 2.8,
+        );
+        if (state.isAnimatedSprite) {
+          const sprite = state.anim as PIXI.AnimatedSprite;
+          sprite.animationSpeed = targetSpeed;
+          if (!sprite.playing) sprite.play();
+        } else if (state.isSpine) {
+          (state.anim as any).state.timeScale = targetSpeed;
+          (state.anim as any).autoUpdate = true;
+        }
+      }
+
+      if (panicElapsed > KILL_PANIC_MS) {
+        const fadeT = Math.min(
+          (panicElapsed - KILL_PANIC_MS) / KILL_FADE_MS,
+          1,
+        );
+        obj.alpha = state.startAlpha * (1 - killEaseOut(fadeT));
+      } else {
+        obj.alpha = state.startAlpha;
+      }
+
+      if (elapsed >= KILL_TOTAL_MS) {
+        state.cleanup();
+        activeKillAnims.splice(i, 1);
+      }
+    }
+  }
+
   function clearFish() {
     for (const fish of liveFish) {
       fishLayer.removeChild(fish.display);
@@ -579,7 +773,14 @@ export function createFishContextMachine(options: {
           ? Math.min(fish.segmentElapsedMs / segment.durationMs, 1)
           : 1;
       const direction = segment
-        ? bezierTangent(segment.p0, segment.p1, segment.p2, segment.p3, t)
+        ? bezierTangentInto(
+            segment.p0,
+            segment.p1,
+            segment.p2,
+            segment.p3,
+            t,
+            SCRATCH_TANGENT,
+          )
         : { dx: 1, dy: 0 };
       fish.exitTarget = getExitTarget(fish.display.position, direction);
       fish.exitSpeed = 520;
@@ -655,8 +856,8 @@ export function createFishContextMachine(options: {
     const rawTilt = Math.atan2(direction.dy, Math.max(0.0001, forwardDx));
     const angle = clamp(rawTilt, -SPINE_MAX_TILT, SPINE_MAX_TILT);
     const defaultFlipX = movingRight ? -1 : 1;
-    const reverseFacingFishIds = new Set([18, 19]);
-    const flipX = reverseFacingFishIds.has(fishId ?? -1)
+    // const reverseFacingFishIds = new Set([18, 19]);
+    const flipX = REVERSE_FACING_FISH_IDS.has(fishId ?? -1)
       ? -defaultFlipX
       : defaultFlipX;
     return { angle, flipX };
@@ -775,14 +976,21 @@ export function createFishContextMachine(options: {
       return;
     }
     handle.display.position.set(firstPoint.x, firstPoint.y);
-    const direction = bezierTangent(
+    // const direction = bezierTangent(
+    //   firstSegment.p0,
+    //   firstSegment.p1,
+    //   firstSegment.p2,
+    //   firstSegment.p3,
+    //   0,
+    // );
+    const direction = bezierTangentInto(
       firstSegment.p0,
       firstSegment.p1,
       firstSegment.p2,
       firstSegment.p3,
       0,
+      SCRATCH_TANGENT,
     );
-
     // 1. read factory scale immediately — nothing has touched it yet
     const baseScaleX = (handle.display as PIXI.Container).scale.x || 1;
     const baseScaleY = (handle.display as PIXI.Container).scale.y || 1;
@@ -795,32 +1003,39 @@ export function createFishContextMachine(options: {
     d.__baseScaleX = baseScaleX;
     d.__baseScaleY = baseScaleY;
 
-    // 3. NOW apply childScale on top
     const childScale = getFishChildScale();
-    (handle.display as PIXI.Container).scale.set(
-      baseScaleX * childScale.x,
-      baseScaleY * childScale.y,
-    );
-
     const uniformChildScale = Math.min(childScale.x, childScale.y);
     (handle.display as PIXI.Container).scale.set(
       baseScaleX * uniformChildScale,
       baseScaleY * uniformChildScale,
     );
 
-    console.log(
-      "[spawnFish] fishId:",
-      event.fishId,
-      "baseScale:",
-      baseScaleX,
-      baseScaleY,
-      "childScale:",
-      childScale.x,
-      childScale.y,
-      "final:",
-      baseScaleX * childScale.x,
-      baseScaleY * childScale.y,
-    );
+    // 3. NOW apply childScale on top
+    // const childScale = getFishChildScale();
+    // (handle.display as PIXI.Container).scale.set(
+    //   baseScaleX * childScale.x,
+    //   baseScaleY * childScale.y,
+    // );
+
+    // const uniformChildScale = Math.min(childScale.x, childScale.y);
+    // (handle.display as PIXI.Container).scale.set(
+    //   baseScaleX * uniformChildScale,
+    //   baseScaleY * uniformChildScale,
+    // );
+
+    // console.log(
+    //   "[spawnFish] fishId:",
+    //   event.fishId,
+    //   "baseScale:",
+    //   baseScaleX,
+    //   baseScaleY,
+    //   "childScale:",
+    //   childScale.x,
+    //   childScale.y,
+    //   "final:",
+    //   baseScaleX * childScale.x,
+    //   baseScaleY * childScale.y,
+    // );
 
     // 4. heading AFTER scale is set
     if ("rotation" in handle.display) {
@@ -1105,7 +1320,8 @@ export function createFishContextMachine(options: {
   // }
 
   function updateFish(deltaMs: number) {
-    liveFish = liveFish.filter((fish) => {
+    for (let i = liveFish.length - 1; i >= 0; i--) {
+      const fish = liveFish[i]!;
       fish.elapsedMs += deltaMs;
       if (fish.isExiting && fish.exitTarget && fish.exitSpeed) {
         resetDisplayAnimationSpeed(fish.display);
@@ -1133,7 +1349,8 @@ export function createFishContextMachine(options: {
         if (fish.segmentIndex >= fish.segments.length) {
           fishLayer.removeChild(fish.display);
           fish.destroy();
-          return false;
+          liveFish.splice(i, 1);
+          continue;
         }
 
         if (fish.delayRemainingMs > 0) {
@@ -1144,7 +1361,8 @@ export function createFishContextMachine(options: {
           if (!segment) {
             fishLayer.removeChild(fish.display);
             fish.destroy();
-            return false;
+            liveFish.splice(i, 1);
+            continue;
           }
           const durationMs = Math.max(1, segment.durationMs);
           fish.segmentElapsedMs = Math.min(
@@ -1153,19 +1371,36 @@ export function createFishContextMachine(options: {
           );
           const t =
             segment.durationMs <= 0 ? 1 : fish.segmentElapsedMs / durationMs;
-          const point = bezierPoint(
+          // const point = bezierPoint(
+          //   segment.p0,
+          //   segment.p1,
+          //   segment.p2,
+          //   segment.p3,
+          //   t,
+          // );
+          // const direction = bezierTangent(
+          //   segment.p0,
+          //   segment.p1,
+          //   segment.p2,
+          //   segment.p3,
+          //   t,
+          // );
+
+          const point = bezierPointInto(
             segment.p0,
             segment.p1,
             segment.p2,
             segment.p3,
             t,
+            SCRATCH_POINT,
           );
-          const direction = bezierTangent(
+          const direction = bezierTangentInto(
             segment.p0,
             segment.p1,
             segment.p2,
             segment.p3,
             t,
+            SCRATCH_TANGENT,
           );
 
           setDisplayAnimationSpeed(
@@ -1207,7 +1442,8 @@ export function createFishContextMachine(options: {
         if (fish.isBoss) {
           releaseBossSlot();
         }
-        return false;
+        liveFish.splice(i, 1);
+        continue;
       }
 
       if (fish.isExiting && isOutOfScreen) {
@@ -1216,11 +1452,9 @@ export function createFishContextMachine(options: {
         if (fish.isBoss) {
           releaseBossSlot();
         }
-        return false;
+        liveFish.splice(i, 1);
       }
-
-      return true;
-    });
+    }
   }
 
   function tick() {
@@ -1271,9 +1505,11 @@ export function createFishContextMachine(options: {
     updateFish(deltaMs);
 
     if (bossTimers.length > 0) {
-      bossTimers = bossTimers
-        .map((timer) => ({ remainingMs: timer.remainingMs - deltaMs }))
-        .filter((timer) => timer.remainingMs > 0);
+      for (let i = bossTimers.length - 1; i >= 0; i--) {
+        const timer = bossTimers[i]!;
+        timer.remainingMs -= deltaMs;
+        if (timer.remainingMs <= 0) bossTimers.splice(i, 1);
+      }
       while (bossActiveCount > bossTimers.length && bossTimers.length === 0) {
         releaseBossSlot();
       }
@@ -1351,12 +1587,16 @@ export function createFishContextMachine(options: {
     ) {
       bossSceneLock = initialRuntimeState.boss_scene_lock_id;
     }
-
     app.ticker.add(tick);
+    app.ticker.add(updateKillAnimations);
+    // app.ticker.add(tick);
   }
 
   function destroy() {
     app.ticker.remove(tick);
+    app.ticker.remove(updateKillAnimations);
+    for (const state of activeKillAnims) state.cleanup();
+    activeKillAnims.length = 0;
     clearFish();
   }
 
@@ -1371,10 +1611,6 @@ export function createFishContextMachine(options: {
       isDying?: boolean;
       __isDying?: boolean;
       __isDeadFish?: boolean;
-      x: number;
-      y: number;
-      alpha: number;
-      rotation: number;
     };
 
     if (tagged.isDying || tagged.__isDying) return;
@@ -1388,7 +1624,6 @@ export function createFishContextMachine(options: {
 
     const obj = display as PIXI.Container;
 
-    // ── Anim type guards (AnimatedSprite vs Spine) ───────────────────────
     const isAnimatedSprite = (o: any): o is PIXI.AnimatedSprite =>
       !!o &&
       typeof o.stop === "function" &&
@@ -1403,7 +1638,6 @@ export function createFishContextMachine(options: {
       | (PIXI.DisplayObject & { state?: any; autoUpdate?: boolean })
       | undefined;
 
-    // Stop swimming animation, regardless of underlying type
     if (anim && !(anim as any).destroyed) {
       if (isAnimatedSprite(anim)) {
         anim.stop();
@@ -1412,29 +1646,7 @@ export function createFishContextMachine(options: {
       }
     }
 
-    const startX = obj.x;
-    const startY = obj.y;
-    const startRot = obj.rotation ?? 0;
-    const startAlpha = obj.alpha ?? 1;
-
-    const SHOCK_MS = 90;
-    const DROP_MS = 210;
-    const PANIC_MS = 260;
-    const FADE_MS = 240;
-    const TOTAL_MS = SHOCK_MS + DROP_MS + PANIC_MS + FADE_MS;
-
-    const SHOCK_LIFT = 18;
-    const BOUNCE_DEPTH = 6;
-
-    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
-    const easeInOut = (t: number) =>
-      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-
-    let elapsed = 0;
-
     const cleanup = () => {
-      // Fully halt spine before destroy, to avoid ticker updating a
-      // half-destroyed skeleton on the next frame.
       if (anim && isSpineDisplay(anim)) {
         try {
           (anim as any).state.clearTracks();
@@ -1443,86 +1655,23 @@ export function createFishContextMachine(options: {
         }
         (anim as any).autoUpdate = false;
       }
-
       if (!obj.destroyed) fishLayer.removeChild(obj);
       live?.destroy();
       if (live?.isBoss) releaseBossSlot();
     };
 
-    const onKill = () => {
-      if (obj.destroyed) {
-        PIXI.Ticker.shared.remove(onKill);
-        cleanup();
-        return;
-      }
-
-      elapsed += PIXI.Ticker.shared.elapsedMS;
-
-      // Phase 1 — shock: shake sideways + lift up
-      if (elapsed <= SHOCK_MS) {
-        const t = Math.min(elapsed / SHOCK_MS, 1);
-        obj.x = startX + Math.sin(t * Math.PI * 5) * 5 * (1 - t * 0.35);
-        obj.y = startY - SHOCK_LIFT * easeOut(t);
-        obj.rotation = startRot + Math.sin(t * Math.PI * 4) * 0.08 * (1 - t);
-        obj.alpha = startAlpha;
-        return;
-      }
-
-      // Phase 2 — drop: fall back down with a small bounce
-      if (elapsed <= SHOCK_MS + DROP_MS) {
-        const t = Math.min((elapsed - SHOCK_MS) / DROP_MS, 1);
-        obj.x = startX + Math.sin(t * Math.PI * 6) * 1.5 * (1 - t);
-        if (t < 0.78) {
-          obj.y =
-            startY -
-            SHOCK_LIFT +
-            (SHOCK_LIFT + BOUNCE_DEPTH) * easeInOut(t / 0.78);
-        } else { 
-          obj.y = startY + BOUNCE_DEPTH * (1 - easeOut((t - 0.78) / 0.22));
-        }
-        obj.rotation = startRot + Math.sin(t * Math.PI * 3) * 0.04 * (1 - t);
-        obj.alpha = startAlpha;
-        return;
-      }
-
-      // Phase 3 & 4 — panic wiggle, then fade out
-      const panicElapsed = elapsed - SHOCK_MS - DROP_MS;
-      const wave = panicElapsed * 0.07;
-      obj.x = startX + Math.sin(wave * 2.6) * 4;
-      obj.y = startY + Math.sin(wave) * 2;
-      obj.rotation = startRot + Math.sin(wave * 1.8) * 0.05;
-
-      // Speed up the swim cycle during panic (type-safe per anim kind)
-      if (anim && !(anim as any).destroyed) {
-        const targetSpeed = Math.max(
-          2.4,
-          ((obj as any).__walkAnimSpeed ?? 1) * 2.8,
-        );
-
-        if (isAnimatedSprite(anim)) {
-          anim.animationSpeed = targetSpeed;
-          if (!anim.playing) anim.play();
-        } else if (isSpineDisplay(anim)) {
-          (anim as any).state.timeScale = targetSpeed;
-          // ensure spine keeps ticking through the panic phase
-          (anim as any).autoUpdate = true;
-        }
-      }
-
-      if (panicElapsed > PANIC_MS) {
-        const fadeT = Math.min((panicElapsed - PANIC_MS) / FADE_MS, 1);
-        obj.alpha = startAlpha * (1 - easeOut(fadeT));
-      } else {
-        obj.alpha = startAlpha;
-      }
-
-      if (elapsed < TOTAL_MS) return;
-
-      PIXI.Ticker.shared.remove(onKill);
-      cleanup();
-    };
-
-    PIXI.Ticker.shared.add(onKill);
+    activeKillAnims.push({
+      obj,
+      anim,
+      isAnimatedSprite: isAnimatedSprite(anim),
+      isSpine: isSpineDisplay(anim),
+      startX: obj.x,
+      startY: obj.y,
+      startRot: obj.rotation ?? 0,
+      startAlpha: obj.alpha ?? 1,
+      elapsed: 0,
+      cleanup,
+    });
   }
   return {
     start,
