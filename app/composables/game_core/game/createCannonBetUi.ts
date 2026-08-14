@@ -52,8 +52,6 @@ const BULLET_SPEED = 1200;
 const UI_ATLAS_URL = `${FISH_BASE_PATH}/resources/ui.atlas.txt`;
 const CANNON_ATLAS_URL = `${FISH_BASE_PATH}/resources/cannon.atlas.txt`;
 const BULLET_ATLAS_URL = `${FISH_BASE_PATH}/resources/bullet.atlas.txt`;
-const BULLET_FIRE_INTERVAL_MS = 200;
-const MAX_ACTIVE_BULLETS = 20;
 
 const easeOutExpo = (t: number) => (t === 1 ? 1 : 1 - Math.pow(2, -10 * t));
 
@@ -115,36 +113,6 @@ export async function createCannonBetUi(options?: {
     return texture;
   };
 
-  const cannonTextures: Record<CannonLevel, PIXI.Texture> = {
-    1: requireTexture(CANNON_ATLAS_URL, getCannonFrameName(1)),
-    2: requireTexture(CANNON_ATLAS_URL, getCannonFrameName(2)),
-    3: requireTexture(CANNON_ATLAS_URL, getCannonFrameName(3)),
-  };
-  const bulletTextures: Record<CannonLevel, PIXI.Texture> = {
-    1: requireTexture(BULLET_ATLAS_URL, getBulletFrameName(1)),
-    2: requireTexture(BULLET_ATLAS_URL, getBulletFrameName(2)),
-    3: requireTexture(BULLET_ATLAS_URL, getBulletFrameName(3)),
-  };
-  const netTextures: Record<CannonLevel, PIXI.Texture> = {
-    1: requireTexture(BULLET_ATLAS_URL, getNetFrameName(1)),
-    2: requireTexture(BULLET_ATLAS_URL, getNetFrameName(2)),
-    3: requireTexture(BULLET_ATLAS_URL, getNetFrameName(3)),
-  };
-  const netBaseRadii: Record<CannonLevel, number> = {
-    1: netTextures[1].width * 0.6,
-    2: netTextures[2].width * 0.6,
-    3: netTextures[3].width * 0.6,
-  };
-  const muzzleCoreTexture = requireTexture(CANNON_ATLAS_URL, "fire_03-4.png");
-  const muzzleFlashTexture = requireTexture(CANNON_ATLAS_URL, "fire_1.png");
-  const clickMarkerTexture = requireTexture(
-    UI_ATLAS_URL,
-    "ui/mouse_position.png",
-  );
-  const burstTextures = BURST_FRAMES.map((frame) =>
-    requireTexture(CANNON_ATLAS_URL, frame),
-  );
-
   const container = new PIXI.Container();
   container.sortableChildren = true;
 
@@ -160,7 +128,10 @@ export async function createCannonBetUi(options?: {
 
   // cannon
   const cannonSprite = new PIXI.Sprite(
-    cannonTextures[getCannonLevel(getBetStep(currentBetIndex))],
+    requireTexture(
+      CANNON_ATLAS_URL,
+      getCannonFrameName(getCannonLevel(getBetStep(currentBetIndex))),
+    ),
   );
   cannonSprite.anchor.set(0.5, 1);
   cannonSprite.position.set(0, -base.height + 60);
@@ -186,170 +157,60 @@ export async function createCannonBetUi(options?: {
     cannonSprite.rotation = getAimRotation(targetX, targetY);
   };
 
-  type MuzzleFlashInstance = {
-    core: PIXI.Sprite;
-    flash: PIXI.Sprite;
-    elapsed: number;
-  };
-
-  type SpriteEffectInstance = {
-    sprite: PIXI.Sprite;
-    elapsed: number;
-    level?: CannonLevel;
-  };
-
-  const activeMuzzleFlashes: MuzzleFlashInstance[] = [];
-  const muzzleFlashPool: MuzzleFlashInstance[] = [];
-  const activeClickMarkers: SpriteEffectInstance[] = [];
-  const clickMarkerPool: PIXI.Sprite[] = [];
-  const activeHitRings: SpriteEffectInstance[] = [];
-  const hitRingPool: PIXI.Sprite[] = [];
-
-  const acquireMuzzleFlash = () => {
-    const pooled = muzzleFlashPool.pop();
-    if (pooled) {
-      pooled.core.visible = true;
-      pooled.flash.visible = true;
-      return pooled;
-    }
-
-    const core = new PIXI.Sprite(muzzleCoreTexture);
-    core.anchor.set(0.5, 0.9);
-    core.zIndex = 5;
-    core.blendMode = PIXI.BLEND_MODES.ADD;
-    container.addChild(core);
-
-    const flash = new PIXI.Sprite(muzzleFlashTexture);
-    flash.anchor.set(0.5, 0.9);
-    flash.zIndex = 5;
-    flash.blendMode = PIXI.BLEND_MODES.ADD;
-    container.addChild(flash);
-
-    return { core, flash, elapsed: 0 };
-  };
-
-  const releaseMuzzleFlash = (inst: MuzzleFlashInstance) => {
-    inst.core.visible = false;
-    inst.flash.visible = false;
-    muzzleFlashPool.push(inst);
-  };
-
-  const acquireClickMarker = (): PIXI.Sprite => {
-    const pooled = clickMarkerPool.pop();
-    if (pooled) {
-      pooled.visible = true;
-      return pooled;
-    }
-
-    const created = new PIXI.Sprite(clickMarkerTexture);
-    created.anchor.set(0.5, 0.5);
-    created.zIndex = 9;
-    container.addChild(created);
-    return created;
-  };
-
-  const releaseClickMarker = (sprite: PIXI.Sprite) => {
-    sprite.visible = false;
-    clickMarkerPool.push(sprite);
-  };
-
-  const acquireHitRing = (level: CannonLevel): PIXI.Sprite => {
-    const pooled = hitRingPool.pop();
-    if (pooled) {
-      pooled.texture = netTextures[level];
-      pooled.visible = true;
-      return pooled;
-    }
-
-    const created = new PIXI.Sprite(netTextures[level]);
-    created.anchor.set(0.5, 0.5);
-    created.zIndex = 8;
-    container.addChild(created);
-    return created;
-  };
-  let lastFireTime = 0;
-  const canFireBullet = () => {
-    const now = performance.now();
-
-    if (now - lastFireTime < BULLET_FIRE_INTERVAL_MS) {
-      return false;
-    }
-
-    lastFireTime = now;
-    return true;
-  };
-
-  const releaseHitRing = (sprite: PIXI.Sprite) => {
-    sprite.visible = false;
-    hitRingPool.push(sprite);
-  };
-
-  const updateEffects = () => {
-    const elapsedMS = PIXI.Ticker.shared.elapsedMS;
-
-    for (let i = activeMuzzleFlashes.length - 1; i >= 0; i--) {
-      const inst = activeMuzzleFlashes[i]!;
-      inst.elapsed += elapsedMS;
-      const progress = Math.min(inst.elapsed / 160, 1);
-      inst.core.scale.set(0.65 + progress * 0.25, 0.65 + progress * 0.75);
-      inst.core.alpha = 1 - progress;
-      inst.flash.scale.set(1.0 + progress * 0.8, 1.0 + progress * 1.8);
-      inst.flash.alpha = 1 - progress * 1.2;
-      if (progress >= 1) {
-        activeMuzzleFlashes.splice(i, 1);
-        releaseMuzzleFlash(inst);
-      }
-    }
-
-    for (let i = activeClickMarkers.length - 1; i >= 0; i--) {
-      const inst = activeClickMarkers[i]!;
-      inst.elapsed += elapsedMS;
-      const progress = Math.min(inst.elapsed / 240, 1);
-      const eased = easeOutExpo(progress);
-      inst.sprite.scale.set(0.78 + eased * 0.3);
-      inst.sprite.alpha = 1 - eased;
-      if (progress >= 1) {
-        activeClickMarkers.splice(i, 1);
-        releaseClickMarker(inst.sprite);
-      }
-    }
-
-    for (let i = activeHitRings.length - 1; i >= 0; i--) {
-      const inst = activeHitRings[i]!;
-      inst.elapsed += elapsedMS;
-      const progress = Math.min(inst.elapsed / 400, 1);
-      const eased = easeOutExpo(progress);
-      inst.sprite.scale.set(0.1 + eased * 1.4);
-      inst.sprite.alpha = Math.max(0, 1 - eased * 0.3);
-      if (progress >= 1) {
-        activeHitRings.splice(i, 1);
-        releaseHitRing(inst.sprite);
-      }
-    }
-  };
-
-  PIXI.Ticker.shared.add(updateEffects);
-
   const playMuzzleFlash = (rotation: number) => {
     const muzzle = getMuzzlePosition(rotation);
-    const offset = 25;
+
+    const offset = 25; // push fire forward (adjust 20–40 for perfect look)
+
     const posX = muzzle.x + Math.sin(rotation) * offset;
     const posY = muzzle.y - Math.cos(rotation) * offset;
 
-    const inst = acquireMuzzleFlash();
-    inst.elapsed = 0;
-    const flashCore = inst.core;
-    const flash = inst.flash;
-
+    // 🔥 big core flame
+    const flashCore = new PIXI.Sprite(
+      requireTexture(CANNON_ATLAS_URL, "fire_03-4.png"),
+    );
+    flashCore.anchor.set(0.5, 0.9);
     flashCore.position.set(posX, posY);
     flashCore.rotation = rotation;
     flashCore.scale.set(0.65);
     flashCore.alpha = 1;
+    flashCore.zIndex = 5;
+    flashCore.blendMode = PIXI.BLEND_MODES.ADD;
+
+    container.addChild(flashCore);
+
+    // 🔥 small burst flame
+    const flash = new PIXI.Sprite(
+      requireTexture(CANNON_ATLAS_URL, "fire_1.png"),
+    );
+    flash.anchor.set(0.5, 0.9);
     flash.position.set(posX, posY);
     flash.rotation = rotation;
     flash.scale.set(1.0);
     flash.alpha = 1;
-    activeMuzzleFlashes.push(inst);
+    flash.zIndex = 5;
+    flash.blendMode = PIXI.BLEND_MODES.ADD;
+
+    container.addChild(flash);
+
+    let elapsed = 0;
+    const DURATION = 160;
+    const onFlash = () => {
+      elapsed += PIXI.Ticker.shared.elapsedMS;
+      const progress = Math.min(elapsed / DURATION, 1);
+      flashCore.scale.set(0.65 + progress * 0.25, 0.65 + progress * 0.75);
+      flashCore.alpha = 1 - progress;
+      flash.scale.set(1.0 + progress * 0.8, 1.0 + progress * 1.8);
+      flash.alpha = 1 - progress * 1.2;
+      if (progress >= 1) {
+        PIXI.Ticker.shared.remove(onFlash);
+        container.removeChild(flash);
+        container.removeChild(flashCore);
+        flash.destroy();
+        flashCore.destroy();
+      }
+    };
+    PIXI.Ticker.shared.add(onFlash);
   };
 
   // energy circle
@@ -362,6 +223,7 @@ export async function createCannonBetUi(options?: {
   energyCircle.visible = false;
   energyCircle.zIndex = 1;
 
+  // burst effect sprite
   const burstSprite = new PIXI.Sprite(
     requireTexture(CANNON_ATLAS_URL, "ef_bb_01.png"),
   );
@@ -371,6 +233,7 @@ export async function createCannonBetUi(options?: {
   burstSprite.visible = false;
   burstSprite.zIndex = 4;
 
+  // framefx flash sprite
   const framefxSprite = new PIXI.Sprite(
     requireTexture(CANNON_ATLAS_URL, "framefx.png"),
   );
@@ -382,6 +245,7 @@ export async function createCannonBetUi(options?: {
 
   let burstOnTick: (() => void) | null = null;
 
+  // playBurstEffect — replace burstTicker
   const playBurstEffect = () => {
     if (burstOnTick) {
       PIXI.Ticker.shared.remove(burstOnTick);
@@ -413,7 +277,10 @@ export async function createCannonBetUi(options?: {
         Math.floor(elapsed / FRAME_DURATION) % BURST_FRAMES.length;
       if (newFrameIdx !== frameIdx) {
         frameIdx = newFrameIdx;
-        burstSprite.texture = burstTextures[frameIdx % burstTextures.length]!;
+        burstSprite.texture = requireTexture(
+          CANNON_ATLAS_URL,
+          BURST_FRAMES[frameIdx % BURST_FRAMES.length]!,
+        );
       }
       burstSprite.scale.set(1.5 + eased * 2.0);
       burstSprite.alpha = 1 - eased;
@@ -436,84 +303,71 @@ export async function createCannonBetUi(options?: {
   };
 
   const playClickMarker = (x: number, y: number) => {
-    const marker = acquireClickMarker();
+    const marker = new PIXI.Sprite(
+      requireTexture(UI_ATLAS_URL, "ui/mouse_position.png"),
+    );
+    marker.anchor.set(0.5, 0.5);
     marker.position.set(x, y);
     marker.scale.set(0.78);
     marker.alpha = 1;
-    activeClickMarkers.push({ sprite: marker, elapsed: 0 });
+    marker.zIndex = 9;
+    container.addChild(marker);
+
+    let elapsed = 0;
+    const DURATION = 240;
+    const onMarker = () => {
+      elapsed += PIXI.Ticker.shared.elapsedMS;
+      const progress = Math.min(elapsed / DURATION, 1);
+      const eased = easeOutExpo(progress);
+      marker.scale.set(0.78 + eased * 0.3);
+      marker.alpha = 1 - eased;
+      if (progress >= 1) {
+        PIXI.Ticker.shared.remove(onMarker);
+        container.removeChild(marker);
+        marker.destroy();
+      }
+    };
+    PIXI.Ticker.shared.add(onMarker);
   };
 
   // --- Hit net ---
   const playHitRing = (x: number, y: number, level: CannonLevel) => {
-    const ring = acquireHitRing(level);
+    const ring = new PIXI.Sprite(
+      requireTexture(BULLET_ATLAS_URL, getNetFrameName(level)),
+    );
+    ring.anchor.set(0.5, 0.5);
     ring.position.set(x, y);
     ring.scale.set(0.1);
     ring.alpha = 1;
-    activeHitRings.push({ sprite: ring, elapsed: 0, level });
+    ring.zIndex = 8;
+    container.addChild(ring);
+
+    let elapsed = 0;
+    const DURATION = 400;
+    const onRing = () => {
+      elapsed += PIXI.Ticker.shared.elapsedMS;
+      const p = Math.min(elapsed / DURATION, 1);
+      const eased = easeOutExpo(p);
+      ring.scale.set(0.1 + eased * 1.4);
+      ring.alpha = Math.max(0, 1 - eased * 0.3);
+      if (p >= 1) {
+        PIXI.Ticker.shared.remove(onRing);
+        container.removeChild(ring);
+        ring.destroy();
+      }
+    };
+    PIXI.Ticker.shared.add(onRing);
   };
 
-  // ============================================================
-  // --- Bullet system (refactored for performance) ---
-  // ============================================================
-
+  // --- Bullet ---
   type BulletInstance = {
     sprite: PIXI.Sprite;
+    ticker: PIXI.Ticker;
     vx: number;
     vy: number;
-    bet: number;
-    level: CannonLevel;
   };
 
   const activeBullets: BulletInstance[] = [];
-  const bulletPool: BulletInstance[] = [];
-
-  let hitScratchCapacity = 0;
-  let hitScratch: BulletCollisionTarget[] = [];
-
-  const bulletLocalPoint = new PIXI.Point();
-  const bulletGlobalPoint = new PIXI.Point();
-
-  const ensureCapacity = (n: number) => {
-    if (n <= hitScratchCapacity) return;
-    hitScratchCapacity = n;
-    hitScratch = new Array(n);
-  };
-
-  const acquireBullet = (
-    texture: PIXI.Texture,
-    bet: number,
-    level: CannonLevel,
-  ): BulletInstance => {
-    const pooled = bulletPool.pop();
-    if (pooled) {
-      pooled.sprite.texture = texture;
-      pooled.sprite.visible = true;
-      pooled.sprite.alpha = 1;
-      pooled.sprite.scale.set(0.7);
-      pooled.sprite.rotation = 0;
-      pooled.vx = 0;
-      pooled.vy = 0;
-      pooled.bet = bet;
-      pooled.level = level;
-      return pooled;
-    }
-    const sprite = new PIXI.Sprite(texture);
-    sprite.anchor.set(0.5, 0.5);
-    sprite.scale.set(0.7);
-    sprite.zIndex = BULLET_Z_INDEX;
-    container.addChild(sprite);
-    return { sprite, vx: 0, vy: 0, bet, level };
-  };
-
-  const releaseBullet = (inst: BulletInstance) => {
-    inst.sprite.visible = false;
-    inst.sprite.alpha = 1;
-    inst.sprite.rotation = 0;
-    inst.vx = 0;
-    inst.vy = 0;
-    bulletPool.push(inst);
-  };
-
   let reservedCoins = 0;
 
   const getSpendableCoins = () => {
@@ -529,6 +383,14 @@ export async function createCannonBetUi(options?: {
 
   const releaseCoinsForShot = (bet: number) => {
     reservedCoins = Math.max(0, reservedCoins - bet);
+  };
+
+  const destroyBullet = (inst: BulletInstance) => {
+    // with shared ticker, nothing to destroy on ticker itself
+    const idx = activeBullets.indexOf(inst);
+    if (idx !== -1) activeBullets.splice(idx, 1);
+    if (inst.sprite.parent === container) container.removeChild(inst.sprite);
+    inst.sprite.destroy();
   };
 
   const bounceBulletWithinPlayfield = (inst: BulletInstance) => {
@@ -567,251 +429,233 @@ export async function createCannonBetUi(options?: {
     }
   };
 
-  // Runs on an actual hit only — not the per-frame hot path — so allocations here are fine.
-  const resolveBulletHit = (
-    hitTargets: BulletCollisionTarget[],
-    hitCount: number,
-    localX: number,
-    localY: number,
-    bet: number,
-    level: CannonLevel,
-  ) => {
-    for (let k = 0; k < hitCount; k++) {
-      hitTargets[k]!.onHit?.();
-    }
-
-    playHitRing(localX, localY, level);
-
-    bulletLocalPoint.set(localX, localY);
-    const worldHit = container.toGlobal(bulletLocalPoint, bulletGlobalPoint);
-    const layer = container.parent as PIXI.Container;
-    const layerPos = layer ? layer.toLocal(worldHit) : worldHit;
-    void layerPos; // kept for parity with original (unused beyond original scope)
-
-    let betRequestStarted = false;
-
-    for (let k = 0; k < hitCount; k++) {
-      const target = hitTargets[k]!;
-      const fish = target.fishData;
-      const fishTypeId = fish?.id ?? null;
-      if (!fishTypeId) continue;
-
-      const cannonTypeId = options?.resolveCannonTypeId?.(bet) ?? null;
-      if (!cannonTypeId) continue;
-
-      betRequestStarted = true;
-
-      const rewardLayer = options?.getRewardLayer?.() ?? layer ?? container;
-      const rewardPos = rewardLayer.toLocal(worldHit);
-
-      void options
-        ?.onFishHitResolved?.({ fishTypeId, cannonTypeId, target })
-        .then((result) => {
-          if (!result) return;
-
-          if (result.isKill) {
-            const hittedFish = getFishById(fishTypeId);
-            const amount = result.killReward || 0;
-            if (amount <= 0) return;
-
-            gameAudio.playSoundEffect("coinReward");
-
-            if (hittedFish?.is_boss) {
-              showBossCatchEffect({
-                layer: rewardLayer,
-                x: rewardPos.x,
-                y: rewardPos.y,
-                fishId: fishTypeId,
-                maxKillOdd: hittedFish.max_kill_odd ?? 0,
-                winOdd: amount / bet,
-                lang: "km",
-              });
-            } else {
-              const multiplier = bet > 0 ? amount / bet : 0;
-              const pattern =
-                amount <= 10
-                  ? "single"
-                  : amount <= 50
-                    ? "ring"
-                    : multiplier >= 20
-                      ? "star"
-                      : amount <= 200
-                        ? "filled_circle"
-                        : "diamond";
-
-              showRewardEffect({
-                layer: rewardLayer,
-                x: rewardPos.x,
-                y: rewardPos.y,
-                amount,
-                pattern,
-                boxTarget: options?.getCoinBoxPosition?.(),
-              });
-            }
-          }
-
-          if (result.isReward) {
-            const rewardAmount = result.reward || 0;
-            if (rewardAmount > 0) {
-              gameAudio.playSoundEffect("specialAddCoin");
-
-              const margin = 150;
-              const randX = () =>
-                (Math.random() + Math.random() + Math.random()) / 3;
-              const randY = () =>
-                (Math.random() + Math.random() + Math.random()) / 3;
-
-              const missX = margin + randX() * (GAME_WIDTH - margin * 2);
-              const missY = margin + randY() * (GAME_HEIGHT - margin * 2);
-
-              showFishMissRewardEffect({
-                layer: rewardLayer,
-                x: rewardPos.x,
-                y: rewardPos.y,
-                amount: rewardAmount,
-                fishId: fishTypeId,
-                fishName: fish?.fish_type_name || "Unknown",
-                rewardX: missX,
-                rewardY: missY,
-              });
-            }
-          }
-
-          if (result.isJackpot) {
-            gameAudio.playSoundEffect("specialCoin");
-            showBigRewardEffect({
-              layer: rewardLayer,
-              x: rewardPos.x,
-              y: rewardPos.y,
-              amount: result.jackpotReward || 0,
-              boxTarget: options?.getCoinBoxPosition?.(),
-              shakeTarget: options?.getShakeTarget?.() ?? undefined,
-              screenWidth: GAME_WIDTH,
-              screenHeight: GAME_HEIGHT,
-            });
-          }
-        })
-        .catch((err) => {
-          console.error("[bet] fireBet failed", err);
-        })
-        .finally(() => {
-          releaseCoinsForShot(bet);
-        });
-
-      break;
-    }
-
-    if (!betRequestStarted) {
-      releaseCoinsForShot(bet);
-    }
-  };
-
-  // Single shared per-frame update — replaces one-ticker-per-bullet.
-  const updateBullets = () => {
-    if (activeBullets.length === 0) return;
-
-    const elapsedMS = PIXI.Ticker.shared.elapsedMS;
-    const deltaSeconds = elapsedMS / 1000;
-
-    const worldScale = container.worldTransform.a;
-    const netRadiusPx1 = netBaseRadii[1] * worldScale;
-    const netRadiusPx2 = netBaseRadii[2] * worldScale;
-    const netRadiusPx3 = netBaseRadii[3] * worldScale;
-
-    const collisionTargets = options?.getCollisionTargets?.() ?? [];
-    const targetCount = collisionTargets.length;
-
-    ensureCapacity(targetCount);
-
-    // Reverse iteration so mid-loop splice is safe.
-    for (let i = activeBullets.length - 1; i >= 0; i--) {
-      const inst = activeBullets[i]!;
-      const sprite = inst.sprite;
-
-      sprite.x += inst.vx * deltaSeconds;
-      sprite.y += inst.vy * deltaSeconds;
-
-      bounceBulletWithinPlayfield(inst);
-
-      bulletLocalPoint.set(sprite.x, sprite.y);
-      container.toGlobal(bulletLocalPoint, bulletGlobalPoint);
-      const netRadiusPx =
-        inst.level === 1
-          ? netRadiusPx1
-          : inst.level === 2
-            ? netRadiusPx2
-            : netRadiusPx3;
-      const netRadiusSq = netRadiusPx * netRadiusPx;
-
-      let hitCount = 0;
-      for (let t = 0; t < targetCount; t++) {
-        const target = collisionTargets[t]!;
-        const ddx = bulletGlobalPoint.x - target.center.x;
-        const ddy = bulletGlobalPoint.y - target.center.y;
-        const distSq = ddx * ddx + ddy * ddy;
-        const radiusSq = target.radius * target.radius;
-        if (distSq <= radiusSq || distSq <= netRadiusSq) {
-          hitScratch[hitCount++] = target;
-        }
-      }
-
-      if (hitCount > 0) {
-        // Bullet resolves exactly once: spliced + hidden here, in the same
-        // reverse-iteration pass where the hit was detected.
-        activeBullets.splice(i, 1);
-        releaseBullet(inst);
-        resolveBulletHit(
-          hitScratch,
-          hitCount,
-          sprite.x,
-          sprite.y,
-          inst.bet,
-          inst.level,
-        );
-      }
-    }
-  };
-
-  PIXI.Ticker.shared.add(updateBullets);
-
+  // Replace all individual tickers in fireBullet with shared ticker
   const fireBullet = (targetX: number, targetY: number) => {
-    if (activeBullets.length >= MAX_ACTIVE_BULLETS) {
-      return;
-    }
-    const bet = getBetStep(currentBetIndex);
-    const level = getCannonLevel(bet);
+    const level = getCannonLevel(getBetStep(currentBetIndex));
     const rotation = getAimRotation(targetX, targetY);
     const muzzle = getMuzzlePosition(rotation);
     const startX = muzzle.x - Math.sin(rotation) * BULLET_START_INSET;
     const startY = muzzle.y + Math.cos(rotation) * BULLET_START_INSET;
-
     playMuzzleFlash(rotation);
     gameAudio.playSoundEffect("shoot");
 
-    const inst = acquireBullet(bulletTextures[level], bet, level);
-    const sprite = inst.sprite;
-
+    const sprite = new PIXI.Sprite(
+      requireTexture(BULLET_ATLAS_URL, getBulletFrameName(level)),
+    );
+    sprite.anchor.set(0.5, 0.5);
     sprite.position.set(startX, startY);
-    sprite.rotation = rotation;
+    sprite.scale.set(0.7);
+    sprite.zIndex = BULLET_Z_INDEX;
+    container.addChild(sprite);
 
     const dx = targetX - startX;
     const dy = targetY - startY;
+    sprite.rotation = rotation;
     const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 0.0001);
     const velocityScale = BULLET_SPEED / dist;
 
-    inst.vx = dx * velocityScale;
-    inst.vy = dy * velocityScale;
-    inst.bet = bet;
-    inst.level = level;
+    const inst: BulletInstance = {
+      sprite,
+      ticker: PIXI.Ticker.shared, // ← shared ticker
+      vx: dx * velocityScale,
+      vy: dy * velocityScale,
+    };
 
+    const onTick = () => {
+      if (sprite.destroyed) {
+        PIXI.Ticker.shared.remove(onTick);
+        return;
+      }
+
+      const deltaSeconds = PIXI.Ticker.shared.elapsedMS / 1000;
+      sprite.x += inst.vx * deltaSeconds;
+      sprite.y += inst.vy * deltaSeconds;
+      bounceBulletWithinPlayfield(inst);
+
+      const bulletGlobal = container.toGlobal(
+        new PIXI.Point(sprite.x, sprite.y),
+      );
+      const collisionTargets = options?.getCollisionTargets?.() ?? [];
+      const level = getCannonLevel(getBetStep(currentBetIndex));
+      const netTexture = requireTexture(
+        BULLET_ATLAS_URL,
+        getNetFrameName(level),
+      );
+      const worldScale = container.worldTransform.a;
+      const netRadiusPx = netTexture.width * 0.6 * worldScale;
+
+      const hitTargets = collisionTargets.filter((target) => {
+        const dx = bulletGlobal.x - target.center.x;
+        const dy = bulletGlobal.y - target.center.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        return dist <= target.radius || dist <= netRadiusPx;
+      });
+
+      if (hitTargets.length > 0) {
+        for (const target of hitTargets) target.onHit?.();
+        playHitRing(sprite.x, sprite.y, level);
+
+        const worldHit = container.toGlobal(new PIXI.Point(sprite.x, sprite.y));
+        const layer = container.parent as PIXI.Container;
+        const layerPos = layer ? layer.toLocal(worldHit) : worldHit;
+        const bet = getBetStep(currentBetIndex);
+        let betRequestStarted = false;
+
+        // NOW safe to remove/destroy
+        PIXI.Ticker.shared.remove(onTick);
+        const idx = activeBullets.indexOf(inst);
+        if (idx !== -1) activeBullets.splice(idx, 1);
+        if (sprite.parent) sprite.parent.removeChild(sprite);
+        sprite.destroy();
+
+        // console.log("[bullet] HIT detected", {
+        //   bulletGlobal: { x: worldHit.x.toFixed(2), y: worldHit.y.toFixed(2) },
+        //   layerPos: { x: layerPos.x.toFixed(2), y: layerPos.y.toFixed(2) },
+        //   hitCount: hitTargets.length,
+        //   fishs: hitTargets.map((t) => ({
+        //     hasFishData: !!t.fishData,
+        //     fishData: t.fishData,
+        //   })),
+        // });
+
+        // reward + backend bet using first hit target with fish id
+        for (const target of hitTargets) {
+          const fish = target.fishData;
+          const fishTypeId = fish?.id ?? null;
+          if (!fishTypeId) continue;
+          const cannonTypeId = options?.resolveCannonTypeId?.(bet) ?? null;
+          if (!cannonTypeId) continue;
+          betRequestStarted = true;
+
+          // ── use dedicated reward layer, fallback to parent ───────────
+          const rewardLayer = options?.getRewardLayer?.() ?? layer ?? container;
+          const rewardPos = rewardLayer.toLocal(worldHit);
+
+          void options
+            ?.onFishHitResolved?.({
+              fishTypeId,
+              cannonTypeId,
+              target,
+            })
+            .then((result) => {
+              if (!result) return;
+
+              if (result.isKill) {
+                const hittedFish = getFishById(fishTypeId);
+                const amount = result.killReward || 0;
+                if (amount <= 0) return;
+                gameAudio.playSoundEffect("coinReward");
+                if (hittedFish?.is_boss) {
+                  showBossCatchEffect({
+                    layer: rewardLayer,
+                    x: rewardPos.x,
+                    y: rewardPos.y,
+                    fishId: fishTypeId,
+                    maxKillOdd: hittedFish.max_kill_odd ?? 0,
+                    winOdd: amount / bet,
+                    lang: "km",
+                  });
+                } else {
+                  // if (amount >= 500) {
+                  //   showBigRewardEffect({
+                  //     layer: rewardLayer,
+                  //     x: rewardPos.x,
+                  //     y: rewardPos.y,
+                  //     amount,
+                  //     boxTarget: options?.getCoinBoxPosition?.(),
+                  //   });
+                  //   return;
+                  // }
+
+                  const multiplier = bet > 0 ? amount / bet : 0;
+                  const pattern =
+                    amount <= 10
+                      ? "single"
+                      : amount <= 50
+                        ? "ring"
+                        : multiplier >= 20
+                          ? "star"
+                          : amount <= 200
+                            ? "filled_circle"
+                            : "diamond";
+
+                  showRewardEffect({
+                    layer: rewardLayer,
+                    x: rewardPos.x,
+                    y: rewardPos.y,
+                    amount,
+                    pattern,
+                    boxTarget: options?.getCoinBoxPosition?.(),
+                  });
+                }
+              }
+              if (result.isReward) {
+                const rewardAmount = result.reward || 0;
+                if (rewardAmount > 0) {
+                  gameAudio.playSoundEffect("specialAddCoin");
+                  // Random position biased toward center of screen
+                  // rewardLayer coords: 0,0 top-left to GAME_WIDTH,GAME_HEIGHT bottom-right
+                  const margin = 150; // keep away from edges
+
+                  // Gaussian-ish: average of 3 randoms pulls toward center
+                  const randX = () =>
+                    (Math.random() + Math.random() + Math.random()) / 3;
+                  const randY = () =>
+                    (Math.random() + Math.random() + Math.random()) / 3;
+
+                  const missX = margin + randX() * (GAME_WIDTH - margin * 2);
+                  const missY = margin + randY() * (GAME_HEIGHT - margin * 2);
+
+                  // Convert from fishLayer coords to rewardLayer coords
+                  // Both are the same layer so no conversion needed
+                  showFishMissRewardEffect({
+                    layer: rewardLayer,
+                    x: rewardPos.x,
+                    y: rewardPos.y,
+                    amount: rewardAmount,
+                    fishId: fishTypeId,
+                    fishName: fish?.fish_type_name || "Unknown",
+                    rewardX: missX,
+                    rewardY: missY,
+                  });
+                }
+              }
+
+              if (result.isJackpot) {
+                gameAudio.playSoundEffect("specialCoin");
+                showBigRewardEffect({
+                  layer: rewardLayer,
+                  x: rewardPos.x,
+                  y: rewardPos.y,
+                  amount: result.jackpotReward || 0,
+                  boxTarget: options?.getCoinBoxPosition?.(),
+                  shakeTarget: options?.getShakeTarget?.() ?? undefined,
+                  screenWidth: GAME_WIDTH,
+                  screenHeight: GAME_HEIGHT,
+                });
+              }
+              // playFishKillAnimation()
+            })
+            .catch((err) => {
+              console.error("[bet] fireBet failed", err);
+            })
+            .finally(() => {
+              releaseCoinsForShot(bet);
+            });
+          break;
+        }
+
+        if (!betRequestStarted) {
+          releaseCoinsForShot(bet);
+        }
+      }
+    };
+
+    PIXI.Ticker.shared.add(onTick);
     activeBullets.push(inst);
-    return true;
   };
 
-  // ============================================================
   // --- Bet buttons ---
-  // ============================================================
-
   const betMinus = new PIXI.Sprite(
     requireTexture(UI_ATLAS_URL, "ui/bet_minus.png"),
   );
@@ -845,7 +689,10 @@ export async function createCannonBetUi(options?: {
     const currentBet = getBetStep(currentBetIndex);
     const currentLevel = getCannonLevel(currentBet);
     betValue.text = String(currentBet);
-    cannonSprite.texture = cannonTextures[currentLevel];
+    cannonSprite.texture = requireTexture(
+      CANNON_ATLAS_URL,
+      getCannonFrameName(currentLevel),
+    );
     if (animate) playBurstEffect();
   };
 
@@ -872,6 +719,8 @@ export async function createCannonBetUi(options?: {
 
   // --- Container interaction ---
   container.eventMode = "static";
+  // Keep pointer input available across the whole visible playfield
+  // even after the container is scaled or rotated by the scene.
   container.hitArea = new PIXI.Rectangle(-4000, -4000, 8000, 8000);
 
   container.on("pointermove", (e: PIXI.FederatedPointerEvent) => {
@@ -879,44 +728,19 @@ export async function createCannonBetUi(options?: {
     aimCannonAt(local.x, local.y);
   });
 
-  // container.on("pointertap", (e: PIXI.FederatedPointerEvent) => {
-  //   if (options?.isInputBlocked?.()) {
-  //     return;
-  //   }
-  //   const local = container.toLocal(e.global);
-  //   const currentBet = getBetStep(currentBetIndex);
-  //   const currentCoins =
-  //     options?.getCurrentCoins?.() ?? Number.POSITIVE_INFINITY;
-  //   const spendableCoins = Math.max(0, currentCoins - reservedCoins);
-
-  //   if (currentCoins < currentBet) {
-  //     options?.onInsufficientBalance?.(currentBet, currentCoins);
-  //     return;
-  //   }
-
-  //   if (spendableCoins < currentBet) {
-  //     return;
-  //   }
-
-  //   aimCannonAt(local.x, local.y);
-  //   playClickMarker(local.x, local.y);
-  //   reserveCoinsForShot(currentBet);
-  //   fireBullet(local.x, local.y);
-  // });
-
   container.on("pointertap", (e: PIXI.FederatedPointerEvent) => {
     if (options?.isInputBlocked?.()) {
       return;
     }
-
+    // don't fire if tapping bet buttons
     const local = container.toLocal(e.global);
     const currentBet = getBetStep(currentBetIndex);
-
-    const currentCoins =
-      options?.getCurrentCoins?.() ?? Number.POSITIVE_INFINITY;
-
+    const currentCoins = options?.getCurrentCoins?.() ?? Number.POSITIVE_INFINITY;
     const spendableCoins = Math.max(0, currentCoins - reservedCoins);
 
+    // Only show the dialog when the actual wallet balance is below the bet.
+    // Reserved coins can still block a shot, but we keep that as a silent guard
+    // so the top-up dialog reflects the visible balance the player sees.
     if (currentCoins < currentBet) {
       options?.onInsufficientBalance?.(currentBet, currentCoins);
       return;
@@ -925,22 +749,13 @@ export async function createCannonBetUi(options?: {
     if (spendableCoins < currentBet) {
       return;
     }
-
-    // Check fire rate only after validation
-    if (!canFireBullet()) {
-      return;
-    }
-
     aimCannonAt(local.x, local.y);
     playClickMarker(local.x, local.y);
-
-    if (!fireBullet(local.x, local.y)) {
-      return;
-    }
-
     reserveCoinsForShot(currentBet);
+    fireBullet(local.x, local.y);
   });
 
+  // add all children
   container.addChild(
     energyCircle,
     base,
@@ -958,19 +773,8 @@ export async function createCannonBetUi(options?: {
       PIXI.Ticker.shared.remove(burstOnTick);
       burstOnTick = null;
     }
-
-    PIXI.Ticker.shared.remove(updateBullets);
-    PIXI.Ticker.shared.remove(updateEffects);
-
+    for (const b of [...activeBullets]) destroyBullet(b);
     activeBullets.length = 0;
-    bulletPool.length = 0;
-    activeMuzzleFlashes.length = 0;
-    muzzleFlashPool.length = 0;
-    activeClickMarkers.length = 0;
-    clickMarkerPool.length = 0;
-    activeHitRings.length = 0;
-    hitRingPool.length = 0;
-
     container.destroy({ children: true });
   };
 
@@ -981,6 +785,7 @@ export async function createCannonBetUi(options?: {
 
 export function playFishKillAnimation(
   displayObject: PIXI.DisplayObject,
+
   onComplete?: () => void,
 ) {
   const obj = displayObject as PIXI.Container;
@@ -991,8 +796,11 @@ export function playFishKillAnimation(
   }
 
   const startY = obj.y;
-  const JUMP_H = 55;
-  const DURATION = 600;
+
+  const JUMP_H = 55; // px upward at peak
+
+  const DURATION = 600; // ms total
+
   let elapsed = 0;
 
   const onTick = () => {
@@ -1005,16 +813,26 @@ export function playFishKillAnimation(
     }
 
     const t = Math.min(elapsed / DURATION, 1);
+
+    // arc: sin curve peaks at t=0.4, back at baseline by t=0.8
+
     const arc = Math.sin(t * Math.PI * 1.25) * JUMP_H;
+
+    // fade: hold full opacity until t=0.35, then fade out
+
     const fade = t < 0.35 ? 1 : 1 - (t - 0.35) / 0.65;
 
     obj.y = startY - arc;
+
     obj.alpha = Math.max(0, fade);
 
     if (t >= 1) {
       PIXI.Ticker.shared.remove(onTick);
-      obj.y = startY;
+
+      obj.y = startY; // restore for pool reuse
+
       obj.alpha = 0;
+
       onComplete?.();
     }
   };

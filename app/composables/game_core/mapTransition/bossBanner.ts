@@ -138,10 +138,13 @@ function createBannerBackground(
   // bloom.blendMode = PIXI.BLEND_MODES.ADD;
   // bloom.filters = [new PIXI.BlurFilter(12)]; // Shift bloom up so it extends more above the banner
   container.addChild(band);
+  console.log("setFullWidth called with 88888", width);
   return {
     container,
     setFullWidth: (gameWidth: number, childScaleX: number) => {
       band.width = gameWidth / childScaleX;
+      console.log("setFullWidth called with", gameWidth / childScaleX);
+
       band.position.set(-(gameWidth / childScaleX) / 2, 0);
     },
   };
