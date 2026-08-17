@@ -4,7 +4,10 @@ import {
   type BulletCollisionTarget,
 } from "~/composables/game_core/game/createCannonBetUi";
 import { useFishAssetPreload } from "~/composables/game_core/assets/useFishAssetPreload";
-import { createFishContextMachine } from "~/composables/game_core/fish/useFishContextMachine";
+import {
+  createFishContextMachine,
+  type FishContextPerfOptions,
+} from "~/composables/game_core/fish/useFishContextMachine";
 import { createFishRendererFactory } from "~/composables/game_core/fish/useFishRendererFactory";
 import { createCrocodileAmbient } from "~/composables/game_core/mapAmbient/useCrocodileAmbient";
 import { createNagaAmbient } from "~/composables/game_core/mapAmbient/useNagaAmbient";
@@ -48,6 +51,12 @@ type FishDisplayObject = PIXI.DisplayObject & {
   __isDeadFish?: boolean;
 };
 
+type FishPerfDebugOptions = FishContextPerfOptions & {
+  disableBullets?: boolean;
+  disableRewards?: boolean;
+  disableHitEffects?: boolean;
+};
+
 const GAME_WIDTH = 1280;
 const GAME_HEIGHT = 720;
 const BURN_NOISE_URL =
@@ -59,6 +68,88 @@ const NAGA_ATLAS_URL = "/fish/fish-all-star/resources/naga.atlas.txt";
 const PROFILE_UI_X = 12;
 const PROFILE_UI_Y = 12;
 const PAUSE_RELOAD_THRESHOLD_MS = 30_000;
+const DESKTOP_MAX_RESOLUTION = 2;
+const IOS_MAX_RESOLUTION = 1.5;
+const IOS_TARGET_RENDER_PIXELS = 950_000;
+
+// Menu button placement
+const MENU_BTN_MARGIN = 12;
+const MENU_BTN_TOP_MARGIN = 30;
+const MENU_BTN_SIZE_TOUCH = 88;
+const isTouchLikeDevice =
+  typeof window !== "undefined" &&
+  ((window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches ?? false) ||
+    window.innerWidth < 900);
+
+function isIOSWebKitDevice() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  const platform = navigator.platform;
+  const iPadOS =
+    platform === "MacIntel" && typeof navigator.maxTouchPoints === "number" &&
+    navigator.maxTouchPoints > 1;
+  return /iP(hone|od|ad)/.test(platform) || /iP(hone|od|ad)/.test(ua) || iPadOS;
+}
+
+function getPixiRendererResolution(width: number, height: number) {
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  if (!isIOSWebKitDevice()) return Math.min(dpr, DESKTOP_MAX_RESOLUTION);
+
+  const cssPixels = Math.max(1, width * height);
+  const pixelBudgetResolution = Math.sqrt(IOS_TARGET_RENDER_PIXELS / cssPixels);
+  return Math.max(1, Math.min(dpr, IOS_MAX_RESOLUTION, pixelBudgetResolution));
+}
+
+function shouldLogFishPerf() {
+  if (typeof window === "undefined") return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return (
+      params.has("fishPerf") ||
+      window.localStorage.getItem("fishPerf") === "1" ||
+      isIOSWebKitDevice()
+    );
+  } catch {
+    return isIOSWebKitDevice();
+  }
+}
+
+function getFishPerfFlag(name: string) {
+  if (typeof window === "undefined") return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const value = params.get(name) ?? window.localStorage.getItem(name);
+    return value === "1" || value === "true" || value === "";
+  } catch {
+    return false;
+  }
+}
+
+function getFishPerfNumber(name: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const value = params.get(name) ?? window.localStorage.getItem(name);
+    if (value == null || value.trim() === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getFishPerfDebugOptions(): FishPerfDebugOptions {
+  const fishLimit = getFishPerfNumber("fishPerfFishLimit");
+  return {
+    enabled: shouldLogFishPerf(),
+    disableFishAnimation: getFishPerfFlag("fishPerfDisableFishAnimation"),
+    disableSpineAnimation: getFishPerfFlag("fishPerfDisableSpine"),
+    fishLimit,
+    disableBullets: getFishPerfFlag("fishPerfDisableBullets"),
+    disableRewards: getFishPerfFlag("fishPerfDisableRewards"),
+    disableHitEffects: getFishPerfFlag("fishPerfDisableHitEffects"),
+  };
+}
 
 const scenes: SceneDef[] = [
   {
@@ -108,7 +199,7 @@ export function useFishGameplayScene() {
   let sceneRoot: PIXI.Container<PIXI.DisplayObject> | null = null;
   let backgroundLayer: PIXI.Container<PIXI.DisplayObject> | null = null;
   let fishLayer: PIXI.Container<PIXI.DisplayObject> | null = null;
-  let bannerLayer: PIXI.Container<PIXI.DisplayObject> | null = null; // ✅ add
+  let bannerLayer: PIXI.Container<PIXI.DisplayObject> | null = null;
   let uiLayer: PIXI.Container<PIXI.DisplayObject> | null = null;
   let currentSceneDisplay: SceneDisplay | null = null;
   let cannonBetUi: Awaited<ReturnType<typeof createCannonBetUi>> | null = null;
@@ -118,23 +209,19 @@ export function useFishGameplayScene() {
   let pendingWhilePaused: Array<() => void> = [];
   let onSessionSyncLostHandler: (() => void) | null = null;
 
-  // Add at the top level of useFishGameplayScene(), alongside other let variables:
   let debugRect: PIXI.Graphics | null = null;
 
   function drawDebugRect() {
     if (!debugRect) return;
     debugRect.clear();
 
-    // Semi-transparent red fill
     debugRect.beginFill(0xff0000, 0.15);
     debugRect.drawRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     debugRect.endFill();
 
-    // Green border - edge indicator
     debugRect.lineStyle(6, 0x00ff00, 1);
     debugRect.drawRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    // Yellow corner markers
     const m = 40;
     debugRect.lineStyle(4, 0xffff00, 1);
     debugRect.moveTo(0, m).lineTo(0, 0).lineTo(m, 0);
@@ -170,6 +257,15 @@ export function useFishGameplayScene() {
   let uiChildScale = { x: 1, y: 1 };
   let fishChildScale = { x: 1, y: 1 };
   let pauseReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  let viewportRetryRaf: number | null = null;
+  let perfTicker: (() => void) | null = null;
+  let originalPixiRender: (() => void) | null = null;
+  let lastRenderMs = 0;
+  let worstRenderMs = 0;
+  let collisionBuildMs = 0;
+  let collisionBuildCount = 0;
+  let resizeEventCount = 0;
+  let rendererResizeCount = 0;
 
   let avatarClickHandler: (() => void) | null = null;
   let currentCoins = 0;
@@ -183,6 +279,7 @@ export function useFishGameplayScene() {
     onLogout?: () => void;
   } = {};
   let sessionSyncLost = false;
+  const perfDebugOptions = getFishPerfDebugOptions();
   const CANNON_TYPE_BY_BET_AMOUNT: Record<number, number> = {
     10: 1,
     20: 2,
@@ -241,23 +338,16 @@ export function useFishGameplayScene() {
 
   function syncFishLayerToScene(sceneDisplay: SceneDisplay | null) {
     if (!sceneDisplay || !fishLayer) return;
-    // fishLayer.position.set(GAME_WIDTH / 2, GAME_HEIGHT / 2);
-    // fishLayer.scale.set(1, 1);
   }
 
-  // Add this variable alongside other lets at the top of useFishGameplayScene
   let coinBoxWorldPosition: { x: number; y: number } | undefined = undefined;
 
-  // Add this helper to compute and cache it
   function updateCoinBoxPosition() {
     if (!playerProfileUi || !uiLayer || !fishLayer) {
       coinBoxWorldPosition = undefined;
       return;
     }
 
-    // uiLayer and fishLayer both start at (0,0) with the same scale
-    // so uiLayer local coords === fishLayer local coords
-    // profile is at (PROFILE_UI_X, PROFILE_UI_Y) in uiLayer
     const profileContainer = playerProfileUi.container;
 
     coinBoxWorldPosition = {
@@ -352,10 +442,24 @@ export function useFishGameplayScene() {
 
   function layoutMenuUi() {
     if (!menuUi) return;
-    menuUi.container.position.set(12, GAME_HEIGHT / 2 - 50);
+
+    if (isTouchLikeDevice) {
+      // Top-right on iPhone / touch devices
+      menuUi.container.position.set(
+        GAME_WIDTH - MENU_BTN_SIZE_TOUCH - MENU_BTN_MARGIN,
+        MENU_BTN_TOP_MARGIN,
+      );
+    } else {
+      // Unchanged desktop position: left-middle
+      menuUi.container.position.set(12, GAME_HEIGHT / 2 - 50);
+    }
   }
 
+  const sharedHitFlashFilter = new PIXI.ColorMatrixFilter();
+  sharedHitFlashFilter.brightness(1.8, false);
+
   function flashFishHit(displayObject: PIXI.DisplayObject) {
+    if (perfDebugOptions.disableHitEffects) return;
     const fishDisplay = displayObject as FishDisplayObject;
     if (fishDisplay.isDying || fishDisplay.__isDying) return;
     const flashTarget = fishDisplay.__anim ?? fishDisplay;
@@ -372,9 +476,7 @@ export function useFishGameplayScene() {
       fishDisplay.hitFlashOriginalFilters = targetWithFilters.filters ?? null;
     }
 
-    const flashFilter = new PIXI.ColorMatrixFilter();
-    flashFilter.brightness(1.8, false);
-    targetWithFilters.filters = [flashFilter];
+    targetWithFilters.filters = [sharedHitFlashFilter];
 
     fishDisplay.hitFlashTimeoutId = window.setTimeout(() => {
       targetWithFilters.filters = fishDisplay.hitFlashOriginalFilters ?? null;
@@ -383,8 +485,13 @@ export function useFishGameplayScene() {
     }, 90);
   }
 
+  let cachedCollisionTargets: BulletCollisionTarget[] = [];
+  let cachedCollisionFrame = -1;
+  let lastCollisionTargetCount = 0;
+
   function getFishCollisionTargets(): BulletCollisionTarget[] {
     if (!fishLayer) return [];
+    const collisionStart = shouldLogFishPerf() ? performance.now() : 0;
     const targets: BulletCollisionTarget[] = [];
 
     for (const child of fishLayer.children) {
@@ -397,21 +504,29 @@ export function useFishGameplayScene() {
         continue;
       if (!child.visible || !child.renderable || !child.worldVisible) continue;
 
-      const bounds = child.getBounds();
-      if (bounds.width <= 0 || bounds.height <= 0) continue;
+      const tagged = child as PIXI.DisplayObject & {
+        __collisionRadius?: number;
+      };
+      const localRadius = tagged.__collisionRadius;
+      if (!localRadius || localRadius <= 0) continue;
 
-      const centerX = bounds.x + bounds.width / 2;
-      const centerY = bounds.y + bounds.height / 2;
-      const radius = Math.min(bounds.width, bounds.height) * 0.35;
+      const transform = child.worldTransform;
+      const scaleX = Math.hypot(transform.a, transform.b);
+      const scaleY = Math.hypot(transform.c, transform.d);
+      const radius = localRadius * Math.max(scaleX, scaleY);
+      if (!Number.isFinite(radius) || radius <= 0) continue;
+
+      const centerX = transform.tx;
+      const centerY = transform.ty;
       const fishData =
         (child as any).fishData ?? (child as any).__fishData ?? null;
 
       targets.push({
         bounds: {
-          x: bounds.x,
-          y: bounds.y,
-          width: bounds.width,
-          height: bounds.height,
+          x: centerX - radius,
+          y: centerY - radius,
+          width: radius * 2,
+          height: radius * 2,
         },
         center: { x: centerX, y: centerY },
         radius,
@@ -429,26 +544,62 @@ export function useFishGameplayScene() {
       });
     }
 
+    lastCollisionTargetCount = targets.length;
+    if (shouldLogFishPerf()) {
+      collisionBuildMs += performance.now() - collisionStart;
+      collisionBuildCount += 1;
+    }
     return targets;
+  }
+
+  function getCachedCollisionTargets(): BulletCollisionTarget[] {
+    const frame = pixiApp?.ticker.lastTime ?? 0;
+    if (frame === cachedCollisionFrame) return cachedCollisionTargets;
+    cachedCollisionFrame = frame;
+    cachedCollisionTargets = getFishCollisionTargets();
+    return cachedCollisionTargets;
   }
 
   function applySceneViewport() {
     if (!pixiApp || !sceneRoot) return;
     if (isResizing) return;
-    isResizing = true;
 
     const canvas = pixiApp.view as HTMLCanvasElement;
     const cont = canvas.parentElement as HTMLElement;
     const screenW = cont.clientWidth;
     const screenH = cont.clientHeight;
+
+    if (screenW <= 0 || screenH <= 0) {
+      console.warn(
+        `[viewport] skipped resize with invalid size ${screenW}x${screenH}`,
+      );
+      if (viewportRetryRaf == null) {
+        viewportRetryRaf = requestAnimationFrame(() => {
+          viewportRetryRaf = null;
+          applySceneViewport();
+        });
+      }
+      return;
+    }
+
+    if (viewportRetryRaf != null) {
+      cancelAnimationFrame(viewportRetryRaf);
+      viewportRetryRaf = null;
+    }
+
+    isResizing = true;
+
     const isPortrait = screenH > screenW;
-    console.log(
-      `Applying viewport resize: ${screenW}x${screenH}, portrait: ${isPortrait}`,
-    );
+    const renderWidth = isPortrait ? screenH : screenW;
+    const renderHeight = isPortrait ? screenW : screenH;
+    const nextResolution = getPixiRendererResolution(renderWidth, renderHeight);
+    if (Math.abs(pixiApp.renderer.resolution - nextResolution) > 0.01) {
+      pixiApp.renderer.resolution = nextResolution;
+    }
 
     if (isPortrait) {
-      // swap W/H for rotation
-      pixiApp.renderer.resize(screenH, screenW);
+      pixiApp.renderer.resize(renderWidth, renderHeight);
+      rendererResizeCount += 1;
       canvas.style.position = "absolute";
       canvas.style.top = "0";
       canvas.style.left = "0";
@@ -461,24 +612,18 @@ export function useFishGameplayScene() {
       const scaleY = screenW / GAME_HEIGHT;
       const uniform = Math.min(scaleX, scaleY);
 
-      // BG layer
       backgroundLayer!.scale.set(scaleX, scaleY);
       backgroundLayer!.position.set(0, 0);
 
-      // Fish layer
       fishLayer!.scale.set(scaleX, scaleY);
       fishLayer!.position.set(0, 0);
 
-      // UI layer
       uiLayer!.scale.set(scaleX, scaleY);
-      // console.log("UI scale set to:", uiLayer!.scale);
       uiLayer!.position.set(0, 0);
 
-      // Banner layer
       bannerLayer!.scale.set(scaleX, scaleY);
       bannerLayer!.position.set(0, 0);
 
-      // Child scale
       const childScaleX = uniform / scaleX;
       const childScaleY = uniform / scaleY;
       uiChildScale.x = childScaleX;
@@ -506,11 +651,10 @@ export function useFishGameplayScene() {
         if (bsx === undefined) continue;
         const bsy = tagged.__baseScaleY ?? tagged.baseScaleY ?? bsx;
 
-        // ✅ uniform — use min of both child scales
-        const uniformChildScale = Math.min(childScaleX, childScaleY);
+        const uniformChildScale2 = Math.min(childScaleX, childScaleY);
         (child as PIXI.Container).scale.set(
-          bsx * uniformChildScale,
-          bsy * uniformChildScale,
+          bsx * uniformChildScale2,
+          bsy * uniformChildScale2,
         );
       }
 
@@ -522,31 +666,26 @@ export function useFishGameplayScene() {
       playerProfileUi?.container.scale.set(childScaleX, childScaleY);
       menuUi?.container.scale.set(childScaleX, childScaleY);
     } else {
-      pixiApp.renderer.resize(screenW, screenH);
-      canvas.style.cssText = ""; // clear portrait styles
+      pixiApp.renderer.resize(renderWidth, renderHeight);
+      rendererResizeCount += 1;
+      canvas.style.cssText = "";
 
       const scaleX = screenW / GAME_WIDTH;
       const scaleY = screenH / GAME_HEIGHT;
       const uniform = Math.min(scaleX, scaleY);
 
-      // BG layer
       backgroundLayer!.scale.set(scaleX, scaleY);
       backgroundLayer!.position.set(0, 0);
 
-      // Fish layer
       fishLayer!.scale.set(scaleX, scaleY);
       fishLayer!.position.set(0, 0);
 
-      // UI layer
       uiLayer!.scale.set(scaleX, scaleY);
-      // console.log("UI scale set to:", uiLayer!.scale);
       uiLayer!.position.set(0, 0);
 
-      // Banner layer
       bannerLayer!.scale.set(scaleX, scaleY);
       bannerLayer!.position.set(0, 0);
 
-      // Child scale
       const childScaleX = uniform / scaleX;
       const childScaleY = uniform / scaleY;
       uiChildScale.x = childScaleX;
@@ -574,11 +713,10 @@ export function useFishGameplayScene() {
         if (bsx === undefined) continue;
         const bsy = tagged.__baseScaleY ?? tagged.baseScaleY ?? bsx;
 
-        // ✅ uniform — use min of both child scales
-        const uniformChildScale = Math.min(childScaleX, childScaleY);
+        const uniformChildScale2 = Math.min(childScaleX, childScaleY);
         (child as PIXI.Container).scale.set(
-          bsx * uniformChildScale,
-          bsy * uniformChildScale,
+          bsx * uniformChildScale2,
+          bsy * uniformChildScale2,
         );
       }
 
@@ -594,6 +732,161 @@ export function useFishGameplayScene() {
     isResizing = false;
     drawDebugRect();
     updateCoinBoxPosition();
+    if (shouldLogFishPerf()) {
+      logRendererProfile("resize");
+    }
+  }
+
+  function countSceneGraph(root: PIXI.Container | null) {
+    const stats = {
+      displayObjects: 0,
+      visibleObjects: 0,
+      renderableObjects: 0,
+      rewardEffects: 0,
+      spineObjects: 0,
+      filters: 0,
+    };
+    if (!root) return stats;
+
+    const visit = (node: PIXI.DisplayObject) => {
+      stats.displayObjects += 1;
+      if (node.visible) stats.visibleObjects += 1;
+      if (node.renderable) stats.renderableObjects += 1;
+      if ((node as any).__isRewardEffect) stats.rewardEffects += 1;
+      if ((node as any).skeleton && (node as any).state) stats.spineObjects += 1;
+      const filters = (node as PIXI.DisplayObject & {
+        filters?: PIXI.Filter[] | null;
+      }).filters;
+      if (filters?.length) stats.filters += filters.length;
+
+      const container = node as PIXI.Container;
+      if (!container.children?.length) return;
+      for (const child of container.children) visit(child);
+    };
+
+    visit(root);
+    return stats;
+  }
+
+  function installRenderProbe() {
+    if (!pixiApp || originalPixiRender || !shouldLogFishPerf()) return;
+    originalPixiRender = pixiApp.render.bind(pixiApp);
+    pixiApp.render = () => {
+      const start = performance.now();
+      originalPixiRender?.();
+      lastRenderMs = performance.now() - start;
+      worstRenderMs = Math.max(worstRenderMs, lastRenderMs);
+    };
+  }
+
+  function uninstallRenderProbe() {
+    if (!pixiApp || !originalPixiRender) return;
+    pixiApp.render = originalPixiRender;
+    originalPixiRender = null;
+  }
+
+  function logRendererProfile(reason: string) {
+    if (!pixiApp || !shouldLogFishPerf()) return;
+    const canvas = pixiApp.view as HTMLCanvasElement;
+    const renderer = pixiApp.renderer;
+    const drawPixels = canvas.width * canvas.height;
+    console.info("[fish-perf] renderer", {
+      reason,
+      ios: isIOSWebKitDevice(),
+      dpr: window.devicePixelRatio || 1,
+      rendererResolution: renderer.resolution,
+      css: {
+        width: canvas.clientWidth,
+        height: canvas.clientHeight,
+      },
+      drawingBuffer: {
+        width: canvas.width,
+        height: canvas.height,
+        megapixels: Number((drawPixels / 1_000_000).toFixed(2)),
+      },
+      antialias: !isIOSWebKitDevice(),
+    });
+  }
+
+  function startPerfProbe() {
+    if (!pixiApp || perfTicker || !shouldLogFishPerf()) return;
+    let elapsed = 0;
+    let frames = 0;
+    let worstFrameMs = 0;
+    let spikeCount = 0;
+    perfTicker = () => {
+      if (!pixiApp) return;
+      const dt = pixiApp.ticker.deltaMS;
+      elapsed += dt;
+      frames += 1;
+      worstFrameMs = Math.max(worstFrameMs, dt);
+      if (dt >= 50) {
+        spikeCount += 1;
+        const spikeCannonStats = cannonBetUi?.getPerfStats?.(false) ?? {
+          activeBullets: 0,
+          collisionFrames: 0,
+          collisionTargetTests: 0,
+        };
+        const contextStats = contextMachine?.getPerfStats?.();
+        const graphStats = countSceneGraph(sceneRoot);
+        const canvas = pixiApp.view as HTMLCanvasElement;
+        const renderMegapixels = (canvas.width * canvas.height) / 1_000_000;
+        console.warn("[fish-perf] spike", {
+          frameMs: Number(dt.toFixed(1)),
+          js: contextStats,
+          renderMs: Number(lastRenderMs.toFixed(2)),
+          collisionBuildMs: Number(collisionBuildMs.toFixed(2)),
+          collisionBuildCount,
+          cannon: spikeCannonStats,
+          sceneGraph: graphStats,
+          renderer: {
+            resolution: pixiApp.renderer.resolution,
+            megapixels: Number(renderMegapixels.toFixed(2)),
+          },
+        });
+      }
+      if (elapsed < 2000) return;
+
+      const cannonStats = cannonBetUi?.getPerfStats?.(true) ?? {
+        activeBullets: 0,
+        collisionFrames: 0,
+        collisionTargetTests: 0,
+      };
+      const contextStats = contextMachine?.getPerfStats?.();
+      const graphStats = countSceneGraph(sceneRoot);
+      console.info("[fish-perf] sample", {
+        fps: Number(((frames * 1000) / elapsed).toFixed(1)),
+        worstFrameMs: Number(worstFrameMs.toFixed(1)),
+        worstRenderMs: Number(worstRenderMs.toFixed(2)),
+        spikeCount,
+        resizeEventCount,
+        rendererResizeCount,
+        context: contextStats,
+        fishChildren: fishLayer?.children.length ?? 0,
+        collisionTargets: lastCollisionTargetCount,
+        collisionBuildMs: Number(collisionBuildMs.toFixed(2)),
+        collisionBuildCount,
+        sceneGraph: graphStats,
+        ...cannonStats,
+      });
+      elapsed = 0;
+      frames = 0;
+      worstFrameMs = 0;
+      worstRenderMs = 0;
+      spikeCount = 0;
+      collisionBuildMs = 0;
+      collisionBuildCount = 0;
+      resizeEventCount = 0;
+      rendererResizeCount = 0;
+    };
+    pixiApp.ticker.add(perfTicker);
+  }
+
+  function stopPerfProbe() {
+    if (pixiApp && perfTicker) {
+      pixiApp.ticker.remove(perfTicker);
+    }
+    perfTicker = null;
   }
 
   function applyBannerChildScale(child: PIXI.DisplayObject) {
@@ -617,6 +910,7 @@ export function useFishGameplayScene() {
     isGamePausedByFocus = false;
     contextMachine?.setPaused(false);
     pixiApp.ticker.start();
+    gameAudio.resumeFromBackground();
 
     sessionRuntime.resumeSnapshotLoop(
       () => ({
@@ -640,7 +934,7 @@ export function useFishGameplayScene() {
         maxFailuresBeforeSyncLost: 3,
         onSyncLost: () => {
           sessionSyncLost = true;
-          onSessionSyncLostHandler?.(); // ← no more scope error
+          onSessionSyncLostHandler?.();
         },
       },
     );
@@ -745,7 +1039,6 @@ export function useFishGameplayScene() {
   async function mount(
     container: HTMLDivElement,
     options?: {
-      // onPause?: () => void;
       onPauseTooLong?: () => void;
       onAvatarClick?: () => void;
       onMute?: () => void;
@@ -779,20 +1072,19 @@ export function useFishGameplayScene() {
       if (!pixiApp) return;
       if (paused) {
         if (isGamePausedByFocus) return;
-        isGamePausedByFocus = true; // ← set BEFORE ticker stop
+        isGamePausedByFocus = true;
         contextMachine?.setPaused(true);
         pixiApp.ticker.stop();
         sessionRuntime.pauseSnapshotLoop();
+        gameAudio.pauseForBackground();
         pauseReloadTimer = setTimeout(() => {
           pauseReloadTimer = null;
           options?.onPauseTooLong?.();
         }, PAUSE_RELOAD_THRESHOLD_MS);
-        // options?.onPause?.();
         return;
       }
     }
 
-    // ── Fetch member info ─────────────────────────────────────────────────
     await memberStore.fetchMyInfo();
     const memberInfo = memberStore.info;
     currentCoins = parseFloat(memberInfo.coin_amount ?? "0");
@@ -814,14 +1106,24 @@ export function useFishGameplayScene() {
     burnNoiseTexture = getTexture(BURN_NOISE_URL);
     burnColorTexture = getTexture(BURN_COLOR_URL);
 
+    const rendererResolution = getPixiRendererResolution(
+      container.clientWidth,
+      container.clientHeight,
+    );
+
     pixiApp = new PIXI.Application({
       width: container.clientWidth,
       height: container.clientHeight,
-      antialias: true,
+      antialias: !isIOSWebKitDevice(),
       backgroundAlpha: 0,
-      resolution: window.devicePixelRatio || 1,
+      resolution: rendererResolution,
       autoDensity: true,
+      powerPreference: "high-performance",
     });
+    installRenderProbe();
+    logRendererProfile("mount");
+
+    pixiApp.renderer.events.domElement.style.touchAction = "none";
 
     container.style.position = "relative";
     container.style.overflow = "hidden";
@@ -842,20 +1144,15 @@ export function useFishGameplayScene() {
     sceneRoot.addChild(uiLayer);
 
     debugRect = new PIXI.Graphics();
-    // fishLayer.addChildAt(debugRect, 0);
-    drawDebugRect(); // draw immediately
+    drawDebugRect();
 
     renderScene(currentSceneIndex.value, true);
     cannonBetUi = await createCannonBetUi({
-      getCollisionTargets: getFishCollisionTargets,
+      getCollisionTargets: getCachedCollisionTargets,
       isInputBlocked: () =>
         sessionSyncLost || Boolean(options?.isInputBlocked?.()),
       getCurrentCoins: () => Number(memberStore.info.coin_amount ?? "0") || 0,
-      onCoinsSpent: (_spentCoins, remainingCoins) => {
-        // currentCoins = remainingCoins;
-        // memberStore.setCoins(String(currentCoins));
-        // playerProfileUi?.setCoins(currentCoins);
-      },
+      onCoinsSpent: (_spentCoins, remainingCoins) => { },
       onInsufficientBalance: (requiredCoins, availableCoins) => {
         options?.onInsufficientBalance?.({
           requiredCoins,
@@ -872,7 +1169,6 @@ export function useFishGameplayScene() {
             getElapsedSecondsString(),
           );
           const response = betResp?.data.value.data.bet;
-          // let payout = response?.result.reward.total_payout_amount
           const isKill = response?.result.is_kill;
           const killReward = response?.result.reward.kill_reward.reward_amount;
           const isReward = response?.result.is_reward;
@@ -880,8 +1176,6 @@ export function useFishGameplayScene() {
           const isJackpot = response?.result.is_jackpot;
           const jackpotReward =
             response?.result.reward.jackpot_reward.payout_amount;
-
-          console.log("===========================================", isReward);
 
           if (isKill && target.display) {
             contextMachine?.playKillAnimationForDisplay(target.display);
@@ -896,7 +1190,6 @@ export function useFishGameplayScene() {
             jackpotReward: Math.max(0, Math.round(Number(jackpotReward ?? 0))),
           };
 
-          // ── If paused, defer reward effects until resume ───────────────────
           if (isGamePausedByFocus) {
             return new Promise((resolve) => {
               pendingWhilePaused.push(() => resolve(result));
@@ -912,11 +1205,11 @@ export function useFishGameplayScene() {
       getCoinBoxPosition: () => coinBoxWorldPosition,
       getRewardLayer: () => fishLayer,
       getShakeTarget: () => sceneRoot,
+      perfOptions: perfDebugOptions,
     });
     uiLayer.addChild(cannonBetUi.container);
     layoutCannonUi();
 
-    // ── Player profile UI ─────────────────────────────────────────────────
     playerProfileUi = await createPlayerProfileUi(
       memberInfo.avatar || "/avatar/Avatar6.png",
       undefined,
@@ -934,7 +1227,6 @@ export function useFishGameplayScene() {
     fishInfoDialog = await createFishInfoDialog();
     uiLayer.addChild(fishInfoDialog.container);
 
-    // ── Menu UI ───────────────────────────────────────────────────────────
     menuUi = await createMenuUi({
       items: [
         {
@@ -960,7 +1252,6 @@ export function useFishGameplayScene() {
           label: "Transition",
           onClick: () => menuHandlers.onTransition?.(),
         },
-
         {
           frame: "setting.webp",
           label: "Setting",
@@ -987,9 +1278,11 @@ export function useFishGameplayScene() {
       getFishChildScale: () => fishChildScale,
       initialRuntimeState:
         (boot?.session?.runtime_state_json as Record<string, unknown>) ?? null,
+      perfOptions: perfDebugOptions,
     });
     contextMachine = machine;
     machine.start();
+    startPerfProbe();
     sessionRuntime.startSnapshotLoop(
       () => ({
         total_elapsed_seconds: getElapsedSecondsString(),
@@ -1018,7 +1311,11 @@ export function useFishGameplayScene() {
     );
 
     applySceneViewport();
-    resizeObserver = new ResizeObserver(() => applySceneViewport());
+    logRendererProfile("viewport");
+    resizeObserver = new ResizeObserver(() => {
+      resizeEventCount += 1;
+      applySceneViewport();
+    });
     resizeObserver.observe(container);
 
     visibilityHandler = () => {
@@ -1034,7 +1331,6 @@ export function useFishGameplayScene() {
     };
 
     windowFocusHandler = () => {
-      // Only unpause on focus if document is actually visible
       if (!document.hidden) {
         setGamePaused(false);
       }
@@ -1055,6 +1351,10 @@ export function useFishGameplayScene() {
     if (pauseReloadTimer) {
       clearTimeout(pauseReloadTimer);
       pauseReloadTimer = null;
+    }
+    if (viewportRetryRaf != null) {
+      cancelAnimationFrame(viewportRetryRaf);
+      viewportRetryRaf = null;
     }
 
     if (visibilityHandler) {
@@ -1104,6 +1404,8 @@ export function useFishGameplayScene() {
     menuUi = null;
     contextMachine?.destroy();
     contextMachine = null;
+    stopPerfProbe();
+    uninstallRenderProbe();
     avatarClickHandler = null;
     menuHandlers = {};
 
@@ -1141,7 +1443,7 @@ export function useFishGameplayScene() {
     switchSceneById,
     setPlayerAvatar: (path: string) => playerProfileUi?.setAvatar(path),
     setPlayerUsername: (name: string) => playerProfileUi?.setUsername(name),
-    setPlayerCoins: (_amount: number) => {},
+    setPlayerCoins: (_amount: number) => { },
     isSessionSyncLost: () => sessionSyncLost,
     resumeGame,
   };

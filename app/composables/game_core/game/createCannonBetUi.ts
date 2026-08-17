@@ -70,6 +70,13 @@ export type BulletCollisionTarget = {
   } | null;
 };
 
+type CannonPerfOptions = {
+  enabled?: boolean;
+  disableBullets?: boolean;
+  disableRewards?: boolean;
+  disableHitEffects?: boolean;
+};
+
 let playfieldWidth = GAME_WIDTH;
 let playfieldHeight = GAME_HEIGHT;
 
@@ -100,6 +107,7 @@ export async function createCannonBetUi(options?: {
   getCoinBoxPosition?: () => { x: number; y: number } | undefined;
   getRewardLayer?: () => PIXI.Container | null;
   getShakeTarget?: () => PIXI.Container | null;
+  perfOptions?: CannonPerfOptions;
 }) {
   const { preloadAppAssets, getAtlasTexture } = useFishAssetPreload();
   const gameAudio = useGameAudio();
@@ -158,6 +166,7 @@ export async function createCannonBetUi(options?: {
   };
 
   const playMuzzleFlash = (rotation: number) => {
+    if (options?.perfOptions?.disableHitEffects) return;
     const muzzle = getMuzzlePosition(rotation);
 
     const offset = 25; // push fire forward (adjust 20–40 for perfect look)
@@ -247,6 +256,7 @@ export async function createCannonBetUi(options?: {
 
   // playBurstEffect — replace burstTicker
   const playBurstEffect = () => {
+    if (options?.perfOptions?.disableHitEffects) return;
     if (burstOnTick) {
       PIXI.Ticker.shared.remove(burstOnTick);
       burstOnTick = null;
@@ -303,6 +313,7 @@ export async function createCannonBetUi(options?: {
   };
 
   const playClickMarker = (x: number, y: number) => {
+    if (options?.perfOptions?.disableHitEffects) return;
     const marker = new PIXI.Sprite(
       requireTexture(UI_ATLAS_URL, "ui/mouse_position.png"),
     );
@@ -332,6 +343,7 @@ export async function createCannonBetUi(options?: {
 
   // --- Hit net ---
   const playHitRing = (x: number, y: number, level: CannonLevel) => {
+    if (options?.perfOptions?.disableHitEffects) return;
     const ring = new PIXI.Sprite(
       requireTexture(BULLET_ATLAS_URL, getNetFrameName(level)),
     );
@@ -368,6 +380,11 @@ export async function createCannonBetUi(options?: {
   };
 
   const activeBullets: BulletInstance[] = [];
+  let collisionTargetTests = 0;
+  let collisionFrames = 0;
+  let bulletUpdateMs = 0;
+  let bulletCollisionMs = 0;
+  let worstBulletUpdateMs = 0;
   let reservedCoins = 0;
 
   const getSpendableCoins = () => {
@@ -429,9 +446,22 @@ export async function createCannonBetUi(options?: {
     }
   };
 
+  const queueBetResultApplication = (
+    apply: () => void,
+  ) => {
+    if (typeof window !== "undefined" && window.requestAnimationFrame) {
+      window.requestAnimationFrame(apply);
+      return;
+    }
+
+    setTimeout(apply, 0);
+  };
+
   // Replace all individual tickers in fireBullet with shared ticker
   const fireBullet = (targetX: number, targetY: number) => {
-    const level = getCannonLevel(getBetStep(currentBetIndex));
+    if (options?.perfOptions?.disableBullets) return;
+    const bet = getBetStep(currentBetIndex);
+    const level = getCannonLevel(bet);
     const rotation = getAimRotation(targetX, targetY);
     const muzzle = getMuzzlePosition(rotation);
     const startX = muzzle.x - Math.sin(rotation) * BULLET_START_INSET;
@@ -460,10 +490,18 @@ export async function createCannonBetUi(options?: {
       vx: dx * velocityScale,
       vy: dy * velocityScale,
     };
+    const bulletLocalPoint = new PIXI.Point();
+    const bulletGlobalPoint = new PIXI.Point();
 
     const onTick = () => {
+      const tickStart = options?.perfOptions?.enabled ? performance.now() : 0;
       if (sprite.destroyed) {
         PIXI.Ticker.shared.remove(onTick);
+        if (options?.perfOptions?.enabled) {
+          const elapsed = performance.now() - tickStart;
+          bulletUpdateMs += elapsed;
+          worstBulletUpdateMs = Math.max(worstBulletUpdateMs, elapsed);
+        }
         return;
       }
 
@@ -472,11 +510,17 @@ export async function createCannonBetUi(options?: {
       sprite.y += inst.vy * deltaSeconds;
       bounceBulletWithinPlayfield(inst);
 
+      bulletLocalPoint.set(sprite.x, sprite.y);
       const bulletGlobal = container.toGlobal(
-        new PIXI.Point(sprite.x, sprite.y),
+        bulletLocalPoint,
+        bulletGlobalPoint,
       );
+      const collisionStart = options?.perfOptions?.enabled
+        ? performance.now()
+        : 0;
       const collisionTargets = options?.getCollisionTargets?.() ?? [];
-      const level = getCannonLevel(getBetStep(currentBetIndex));
+      collisionFrames += 1;
+      collisionTargetTests += collisionTargets.length;
       const netTexture = requireTexture(
         BULLET_ATLAS_URL,
         getNetFrameName(level),
@@ -484,21 +528,28 @@ export async function createCannonBetUi(options?: {
       const worldScale = container.worldTransform.a;
       const netRadiusPx = netTexture.width * 0.6 * worldScale;
 
-      const hitTargets = collisionTargets.filter((target) => {
+      const hitTargets: BulletCollisionTarget[] = [];
+      for (const target of collisionTargets) {
         const dx = bulletGlobal.x - target.center.x;
         const dy = bulletGlobal.y - target.center.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        return dist <= target.radius || dist <= netRadiusPx;
-      });
+        if (dist <= target.radius || dist <= netRadiusPx) {
+          hitTargets.push(target);
+        }
+      }
+      if (options?.perfOptions?.enabled) {
+        bulletCollisionMs += performance.now() - collisionStart;
+      }
 
       if (hitTargets.length > 0) {
         for (const target of hitTargets) target.onHit?.();
         playHitRing(sprite.x, sprite.y, level);
 
-        const worldHit = container.toGlobal(new PIXI.Point(sprite.x, sprite.y));
+        const worldHit = container.toGlobal(
+          bulletLocalPoint,
+          bulletGlobalPoint,
+        );
         const layer = container.parent as PIXI.Container;
-        const layerPos = layer ? layer.toLocal(worldHit) : worldHit;
-        const bet = getBetStep(currentBetIndex);
         let betRequestStarted = false;
 
         // NOW safe to remove/destroy
@@ -540,101 +591,88 @@ export async function createCannonBetUi(options?: {
             .then((result) => {
               if (!result) return;
 
-              if (result.isKill) {
-                const hittedFish = getFishById(fishTypeId);
-                const amount = result.killReward || 0;
-                if (amount <= 0) return;
-                gameAudio.playSoundEffect("coinReward");
-                if (hittedFish?.is_boss) {
-                  showBossCatchEffect({
+              queueBetResultApplication(() => {
+                if (options?.perfOptions?.disableRewards) return;
+                if (result.isKill) {
+                  const hittedFish = getFishById(fishTypeId);
+                  const amount = result.killReward || 0;
+                  if (amount > 0) {
+                    gameAudio.playSoundEffect("coinReward");
+                    if (hittedFish?.is_boss) {
+                      showBossCatchEffect({
+                        layer: rewardLayer,
+                        x: rewardPos.x,
+                        y: rewardPos.y,
+                        fishId: fishTypeId,
+                        maxKillOdd: hittedFish.max_kill_odd ?? 0,
+                        winOdd: amount / bet,
+                        lang: "km",
+                      });
+                    } else {
+                      const multiplier = bet > 0 ? amount / bet : 0;
+                      const pattern =
+                        amount <= 10
+                          ? "single"
+                          : amount <= 50
+                            ? "ring"
+                            : multiplier >= 20
+                              ? "star"
+                              : amount <= 200
+                                ? "filled_circle"
+                                : "diamond";
+
+                      showRewardEffect({
+                        layer: rewardLayer,
+                        x: rewardPos.x,
+                        y: rewardPos.y,
+                        amount,
+                        pattern,
+                        boxTarget: options?.getCoinBoxPosition?.(),
+                      });
+                    }
+                  }
+                }
+
+                if (result.isReward) {
+                  const rewardAmount = result.reward || 0;
+                  if (rewardAmount > 0) {
+                    gameAudio.playSoundEffect("specialAddCoin");
+                    const margin = 150;
+                    const randX = () =>
+                      (Math.random() + Math.random() + Math.random()) / 3;
+                    const randY = () =>
+                      (Math.random() + Math.random() + Math.random()) / 3;
+
+                    const missX = margin + randX() * (GAME_WIDTH - margin * 2);
+                    const missY = margin + randY() * (GAME_HEIGHT - margin * 2);
+
+                    showFishMissRewardEffect({
+                      layer: rewardLayer,
+                      x: rewardPos.x,
+                      y: rewardPos.y,
+                      amount: rewardAmount,
+                      fishId: fishTypeId,
+                      fishName: fish?.fish_type_name || "Unknown",
+                      rewardX: missX,
+                      rewardY: missY,
+                    });
+                  }
+                }
+
+                if (result.isJackpot) {
+                  gameAudio.playSoundEffect("specialCoin");
+                  showBigRewardEffect({
                     layer: rewardLayer,
                     x: rewardPos.x,
                     y: rewardPos.y,
-                    fishId: fishTypeId,
-                    maxKillOdd: hittedFish.max_kill_odd ?? 0,
-                    winOdd: amount / bet,
-                    lang: "km",
-                  });
-                } else {
-                  // if (amount >= 500) {
-                  //   showBigRewardEffect({
-                  //     layer: rewardLayer,
-                  //     x: rewardPos.x,
-                  //     y: rewardPos.y,
-                  //     amount,
-                  //     boxTarget: options?.getCoinBoxPosition?.(),
-                  //   });
-                  //   return;
-                  // }
-
-                  const multiplier = bet > 0 ? amount / bet : 0;
-                  const pattern =
-                    amount <= 10
-                      ? "single"
-                      : amount <= 50
-                        ? "ring"
-                        : multiplier >= 20
-                          ? "star"
-                          : amount <= 200
-                            ? "filled_circle"
-                            : "diamond";
-
-                  showRewardEffect({
-                    layer: rewardLayer,
-                    x: rewardPos.x,
-                    y: rewardPos.y,
-                    amount,
-                    pattern,
+                    amount: result.jackpotReward || 0,
                     boxTarget: options?.getCoinBoxPosition?.(),
+                    shakeTarget: options?.getShakeTarget?.() ?? undefined,
+                    screenWidth: GAME_WIDTH,
+                    screenHeight: GAME_HEIGHT,
                   });
                 }
-              }
-              if (result.isReward) {
-                const rewardAmount = result.reward || 0;
-                if (rewardAmount > 0) {
-                  gameAudio.playSoundEffect("specialAddCoin");
-                  // Random position biased toward center of screen
-                  // rewardLayer coords: 0,0 top-left to GAME_WIDTH,GAME_HEIGHT bottom-right
-                  const margin = 150; // keep away from edges
-
-                  // Gaussian-ish: average of 3 randoms pulls toward center
-                  const randX = () =>
-                    (Math.random() + Math.random() + Math.random()) / 3;
-                  const randY = () =>
-                    (Math.random() + Math.random() + Math.random()) / 3;
-
-                  const missX = margin + randX() * (GAME_WIDTH - margin * 2);
-                  const missY = margin + randY() * (GAME_HEIGHT - margin * 2);
-
-                  // Convert from fishLayer coords to rewardLayer coords
-                  // Both are the same layer so no conversion needed
-                  showFishMissRewardEffect({
-                    layer: rewardLayer,
-                    x: rewardPos.x,
-                    y: rewardPos.y,
-                    amount: rewardAmount,
-                    fishId: fishTypeId,
-                    fishName: fish?.fish_type_name || "Unknown",
-                    rewardX: missX,
-                    rewardY: missY,
-                  });
-                }
-              }
-
-              if (result.isJackpot) {
-                gameAudio.playSoundEffect("specialCoin");
-                showBigRewardEffect({
-                  layer: rewardLayer,
-                  x: rewardPos.x,
-                  y: rewardPos.y,
-                  amount: result.jackpotReward || 0,
-                  boxTarget: options?.getCoinBoxPosition?.(),
-                  shakeTarget: options?.getShakeTarget?.() ?? undefined,
-                  screenWidth: GAME_WIDTH,
-                  screenHeight: GAME_HEIGHT,
-                });
-              }
-              // playFishKillAnimation()
+              });
             })
             .catch((err) => {
               console.error("[bet] fireBet failed", err);
@@ -648,6 +686,11 @@ export async function createCannonBetUi(options?: {
         if (!betRequestStarted) {
           releaseCoinsForShot(bet);
         }
+      }
+      if (options?.perfOptions?.enabled) {
+        const elapsed = performance.now() - tickStart;
+        bulletUpdateMs += elapsed;
+        worstBulletUpdateMs = Math.max(worstBulletUpdateMs, elapsed);
       }
     };
 
@@ -751,6 +794,9 @@ export async function createCannonBetUi(options?: {
     }
     aimCannonAt(local.x, local.y);
     playClickMarker(local.x, local.y);
+    if (options?.perfOptions?.disableBullets) {
+      return;
+    }
     reserveCoinsForShot(currentBet);
     fireBullet(local.x, local.y);
   });
@@ -778,7 +824,25 @@ export async function createCannonBetUi(options?: {
     container.destroy({ children: true });
   };
 
-  return { container, destroy, setPlayfieldSize };
+  const getPerfStats = (reset = true) => {
+    const stats = {
+      activeBullets: activeBullets.length,
+      collisionFrames,
+      collisionTargetTests,
+      bulletUpdateMs: Number(bulletUpdateMs.toFixed(2)),
+      bulletCollisionMs: Number(bulletCollisionMs.toFixed(2)),
+      worstBulletUpdateMs: Number(worstBulletUpdateMs.toFixed(2)),
+    };
+    if (!reset) return stats;
+    collisionFrames = 0;
+    collisionTargetTests = 0;
+    bulletUpdateMs = 0;
+    bulletCollisionMs = 0;
+    worstBulletUpdateMs = 0;
+    return stats;
+  };
+
+  return { container, destroy, setPlayfieldSize, getPerfStats };
 }
 
 //── Kill animation ─────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@
     "@tweenjs/tween.js": "^25.0.0",
     "@vite-pwa/nuxt": "^1.1.1",
     "gsap": "^3.14.2",
+    "howler": "^2.2.4",
     "nuxt": "^4.2.2",
     "ofetch": "^1.4.1",
     "pinia": "^3.0.4",
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@types/gsap": "^1.20.2",
+    "@types/howler": "^2.2.13",
     "@types/node": "^25.2.3",
     "@vitejs/plugin-vue": "^6.0.4",
     "@vue/compiler-sfc": "^3.5.28"

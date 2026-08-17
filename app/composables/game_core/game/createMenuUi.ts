@@ -73,12 +73,7 @@ export async function createMenuUi(options?: MenuUiOptions) {
       return PIXI.Texture.EMPTY;
     }
 
-    const frameData =
-      atlasData.frames?.[frameName]
-      // atlasData.frames?.[frameName.replace(/\.png$/, ".webp")] ??
-      // atlasData.frames?.[frameName.replace(/\.webp$/, ".png")] ??
-      // atlasData.frames?.[`${frameName}.webp`] ??
-      // atlasData.frames?.[`${frameName}.png`];
+    const frameData = atlasData.frames?.[frameName];
 
     if (!frameData) {
       console.warn(`[MenuUi] frame not found: ${frameName}`);
@@ -270,12 +265,28 @@ export async function createMenuUi(options?: MenuUiOptions) {
   // Positive offset pushes the panel further down from the button's
   // vertical center. Increase this to move it down more, decrease
   // (or make negative) to move it back up.
+  // Only used in the desktop (right-opening) layout below.
   const PANEL_VERTICAL_OFFSET = isTouchLike ? 60 : 40;
 
-  panel.position.set(
-    MENU_BTN_SIZE + 10,
-    -(panelH / 2) + MENU_BTN_SIZE / 2 + PANEL_VERTICAL_OFFSET,
-  );
+  if (isTouchLike) {
+    // ── Top-right anchor (iPhone) ──
+    // The button itself will be placed at the top-right of the
+    // screen by whoever positions rootContainer. From there, the
+    // panel must open DOWN and to the LEFT of the button, or it
+    // will run off the right edge of the viewport.
+    panel.position.set(
+      -panelW - 10, // left of the button
+      0,            // top-aligned with the button
+    );
+  } else {
+    // ── Default desktop layout ──
+    // Panel opens to the right of the button, vertically centered
+    // (with an offset to nudge it down a bit).
+    panel.position.set(
+      MENU_BTN_SIZE + 10,
+      -(panelH / 2) + MENU_BTN_SIZE / 2 + PANEL_VERTICAL_OFFSET,
+    );
+  }
 
   // ─────────────────────────────────────────────────────────────
   // Background

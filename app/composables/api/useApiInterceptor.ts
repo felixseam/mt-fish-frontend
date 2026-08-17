@@ -33,7 +33,7 @@ export async function useApiInterceptor<T>(
 
   try {
     const response = await $fetch<T>(url, params as any);
-    return { data: ref(response) };
+    return { data: shallowRef(response) };
   } catch (error: any) {
     const status = error.response?.status;
     const errorData = error.response?._data;

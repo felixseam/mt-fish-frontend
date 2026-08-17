@@ -89,6 +89,29 @@ type LiveFish = {
   walkAnimSpeed?: number;
 };
 
+export type FishContextPerfOptions = {
+  enabled?: boolean;
+  disableFishAnimation?: boolean;
+  disableSpineAnimation?: boolean;
+  fishLimit?: number | null;
+};
+
+export type FishContextPerfStats = {
+  liveFish: number;
+  spineFish: number;
+  spriteFish: number;
+  spawned: number;
+  destroyed: number;
+  skippedByFishLimit: number;
+  tickMs: number;
+  spawnMs: number;
+  fishUpdateMs: number;
+  fishMovementMs: number;
+  spineUpdateMs: number;
+  bossTimerMs: number;
+  pendingContextSwitch: boolean;
+};
+
 type RestoredLiveFishState = {
   fish_id: number;
   path_id: number;
@@ -162,9 +185,10 @@ const CONTEXT_SWITCH_LEAD_MS = 2200;
 const TIME_SCALE = 1.0;
 const HEADING_OFFSET = Math.PI / 2;
 const SPINE_MAX_TILT = Math.PI * 0.38;
-const DEBUG_CONTEXT = true;
+const DEBUG_CONTEXT = false;
 const USE_WEIGHTED_GROUP = false;
 const NORMAL_SCENES = ["bg1", "bg2", "bg3"] as const;
+const REVERSE_FACING_FISH_IDS = new Set([18, 19]);
 const BOSS_SCENE_BY_FISH_ID: Record<number, string> = {
   20: "crocodileBoss",
   19: "phoenix",
@@ -435,22 +459,24 @@ function getWalkAdjustedAnimationSpeed(fish: LiveFish, segment: PathSegment) {
   );
 }
 
-function bezierPoint(
+function bezierPointInto(
   p0: PIXI.Point,
   p1: PIXI.Point,
   p2: PIXI.Point,
   p3: PIXI.Point,
   t: number,
+  out: PIXI.Point,
 ) {
   const inv = 1 - t;
   const a = inv * inv * inv;
   const b = 3 * inv * inv * t;
   const c = 3 * inv * t * t;
   const d = t * t * t;
-  return new PIXI.Point(
+  out.set(
     a * p0.x + b * p1.x + c * p2.x + d * p3.x,
     a * p0.y + b * p1.y + c * p2.y + d * p3.y,
   );
+  return out;
 }
 
 function bezierTangent(
@@ -504,6 +530,12 @@ function buildSpawnEvents(groupId: number): {
   return { events, bossCount };
 }
 
+function sanitizeChildScale(scale: { x: number; y: number }) {
+  const x = Number.isFinite(scale.x) && scale.x > 0 ? scale.x : 1;
+  const y = Number.isFinite(scale.y) && scale.y > 0 ? scale.y : 1;
+  return { x, y };
+}
+
 export function createFishContextMachine(options: {
   app: PIXI.Application;
   fishLayer: PIXI.Container;
@@ -514,9 +546,11 @@ export function createFishContextMachine(options: {
     mode?: SceneChangeMode,
   ) => void | Promise<void>;
   initialRuntimeState?: RestoredRuntimeState | null;
+  perfOptions?: FishContextPerfOptions;
 }) {
   const { app, fishLayer, fishFactory, getFishChildScale, onSceneChange } =
     options;
+  const perfOptions = options.perfOptions ?? {};
 
   let currentContextIndex = -1;
   let currentGroupId: number | null = null;
@@ -541,6 +575,60 @@ export function createFishContextMachine(options: {
   } | null = null;
   const initialRuntimeState = options.initialRuntimeState ?? null;
   let pausedAtMs: number | null = null;
+  const bezierScratch = new PIXI.Point();
+  let perfStats: FishContextPerfStats = {
+    liveFish: 0,
+    spineFish: 0,
+    spriteFish: 0,
+    spawned: 0,
+    destroyed: 0,
+    skippedByFishLimit: 0,
+    tickMs: 0,
+    spawnMs: 0,
+    fishUpdateMs: 0,
+    fishMovementMs: 0,
+    spineUpdateMs: 0,
+    bossTimerMs: 0,
+    pendingContextSwitch: false,
+  };
+
+  function resetPerfFrame() {
+    if (!perfOptions.enabled) return;
+    perfStats = {
+      liveFish: liveFish.length,
+      spineFish: 0,
+      spriteFish: 0,
+      spawned: 0,
+      destroyed: 0,
+      skippedByFishLimit: 0,
+      tickMs: 0,
+      spawnMs: 0,
+      fishUpdateMs: 0,
+      fishMovementMs: 0,
+      spineUpdateMs: 0,
+      bossTimerMs: 0,
+      pendingContextSwitch: Boolean(pendingContextSwitch),
+    };
+  }
+
+  function countFishRenderer(display: PIXI.DisplayObject) {
+    if (!perfOptions.enabled) return;
+    const tagged = display as PIXI.DisplayObject & {
+      __anim?: PIXI.DisplayObject;
+    };
+    if (tagged.__anim instanceof Spine) {
+      perfStats.spineFish += 1;
+    } else {
+      perfStats.spriteFish += 1;
+    }
+  }
+
+  function getPerfStats() {
+    return {
+      ...perfStats,
+      liveFish: liveFish.length,
+    };
+  }
 
   function clearFish() {
     for (const fish of liveFish) {
@@ -655,8 +743,7 @@ export function createFishContextMachine(options: {
     const rawTilt = Math.atan2(direction.dy, Math.max(0.0001, forwardDx));
     const angle = clamp(rawTilt, -SPINE_MAX_TILT, SPINE_MAX_TILT);
     const defaultFlipX = movingRight ? -1 : 1;
-    const reverseFacingFishIds = new Set([18, 19]);
-    const flipX = reverseFacingFishIds.has(fishId ?? -1)
+    const flipX = REVERSE_FACING_FISH_IDS.has(fishId ?? -1)
       ? -defaultFlipX
       : defaultFlipX;
     return { angle, flipX };
@@ -676,57 +763,18 @@ export function createFishContextMachine(options: {
       const spineHeading = getSpineHeadingForFish(direction, fid);
       if ("scale" in display) {
         const childScale = getFishChildScale();
-        // ✅ use uniform child scale — same as normal fish
         const uniformChildScale = Math.min(childScale.x, childScale.y);
         display.scale.x =
           Math.abs(baseScaleX) * spineHeading.flipX * uniformChildScale;
         display.scale.y = Math.abs(baseScaleY) * uniformChildScale;
       }
-
-      // // ✅ debug arrow — shows the forward direction in local space
-      // const wrapper = display as PIXI.Container & {
-      //   __debugArrow?: PIXI.Graphics;
-      // };
-      // if (!wrapper.__debugArrow) {
-      //   const arrow = new PIXI.Graphics();
-      //   wrapper.__debugArrow = arrow;
-      //   wrapper.addChild(arrow);
-      // }
-      // const arrow = wrapper.__debugArrow;
-      // arrow.clear();
-
-      // // arrow pointing UP in local space = forward direction
-      // // red line = forward axis
-      // arrow.lineStyle(3, 0xff0000, 1);
-      // arrow.moveTo(0, 0);
-      // arrow.lineTo(0, -120); // up = forward for spine upright fish
-
-      // // arrowhead
-      // arrow.lineStyle(2, 0xff0000, 1);
-      // arrow.moveTo(-10, -100);
-      // arrow.lineTo(0, -120);
-      // arrow.lineTo(10, -100);
-
-      // // green dot = center/pivot
-      // arrow.lineStyle(0);
-      // arrow.beginFill(0x00ff00, 1);
-      // arrow.drawCircle(0, 0, 6);
-      // arrow.endFill();
-
-      // // yellow line = movement direction in WORLD space (before rotation)
-      // // draw it in local space by reversing the display rotation
-      // const worldAngle = Math.atan2(direction.dy, direction.dx);
-      // const localAngle = worldAngle - (display.rotation ?? 0);
-      // arrow.lineStyle(3, 0xffff00, 1);
-      // arrow.moveTo(0, 0);
-      // arrow.lineTo(Math.cos(localAngle) * 100, Math.sin(localAngle) * 100);
-
       return spineHeading.angle;
     }
     return getHeadingAngle(direction);
   }
 
   function spawnFish(event: SpawnEvent) {
+    const spawnStart = perfOptions.enabled ? performance.now() : 0;
     const bossScene = BOSS_SCENE_BY_FISH_ID[event.fishId];
     if (event.isBoss && bossScene) {
       if (bossSceneLock && bossSceneLock !== bossScene && bossActiveCount > 0) {
@@ -746,6 +794,24 @@ export function createFishContextMachine(options: {
       if (event.isBoss) {
         bossTimers.push({ remainingMs: getPathDurationMs(event.pathId) });
       }
+      if (perfOptions.enabled) {
+        perfStats.spawnMs += performance.now() - spawnStart;
+      }
+      return;
+    }
+
+    if (
+      typeof perfOptions.fishLimit === "number" &&
+      perfOptions.fishLimit >= 0 &&
+      liveFish.length >= perfOptions.fishLimit
+    ) {
+      if (event.isBoss) {
+        bossTimers.push({ remainingMs: getPathDurationMs(event.pathId) });
+      }
+      if (perfOptions.enabled) {
+        perfStats.skippedByFishLimit += 1;
+        perfStats.spawnMs += performance.now() - spawnStart;
+      }
       return;
     }
 
@@ -753,6 +819,9 @@ export function createFishContextMachine(options: {
     if (!handle) {
       if (event.isBoss) {
         bossTimers.push({ remainingMs: getPathDurationMs(event.pathId) });
+      }
+      if (perfOptions.enabled) {
+        perfStats.spawnMs += performance.now() - spawnStart;
       }
       return;
     }
@@ -795,8 +864,9 @@ export function createFishContextMachine(options: {
     d.__baseScaleX = baseScaleX;
     d.__baseScaleY = baseScaleY;
 
-    // 3. NOW apply childScale on top
-    const childScale = getFishChildScale();
+    // 3. NOW apply childScale on top (guarded against NaN/zero from a
+    // mid-resize race, e.g. iOS Safari briefly reporting 0 container height)
+    const childScale = sanitizeChildScale(getFishChildScale());
     (handle.display as PIXI.Container).scale.set(
       baseScaleX * childScale.x,
       baseScaleY * childScale.y,
@@ -806,20 +876,6 @@ export function createFishContextMachine(options: {
     (handle.display as PIXI.Container).scale.set(
       baseScaleX * uniformChildScale,
       baseScaleY * uniformChildScale,
-    );
-
-    console.log(
-      "[spawnFish] fishId:",
-      event.fishId,
-      "baseScale:",
-      baseScaleX,
-      baseScaleY,
-      "childScale:",
-      childScale.x,
-      childScale.y,
-      "final:",
-      baseScaleX * childScale.x,
-      baseScaleY * childScale.y,
     );
 
     // 4. heading AFTER scale is set
@@ -853,6 +909,10 @@ export function createFishContextMachine(options: {
       isExiting: false,
       walkAnimSpeed: getFishWalkAnimSpeed(event.fishId),
     });
+    if (perfOptions.enabled) {
+      perfStats.spawned += 1;
+      perfStats.spawnMs += performance.now() - spawnStart;
+    }
   }
 
   function restoreLiveFishFromState(
@@ -886,8 +946,9 @@ export function createFishContextMachine(options: {
       d.__baseScaleX = baseScaleX;
       d.__baseScaleY = baseScaleY;
 
-      // Apply childScale on top — identical to spawnFish
-      const childScale = getFishChildScale();
+      // Apply childScale on top — identical to spawnFish, guarded against
+      // NaN/zero from a mid-resize race.
+      const childScale = sanitizeChildScale(getFishChildScale());
       const uniformChildScale = Math.min(childScale.x, childScale.y);
       (handle.display as PIXI.Container).scale.set(
         baseScaleX * uniformChildScale,
@@ -915,14 +976,14 @@ export function createFishContextMachine(options: {
         segmentIndex: Math.max(0, saved.segment_index ?? 0),
         segmentElapsedMs: Math.max(0, saved.segment_elapsed_ms ?? 0),
         delayRemainingMs: Math.max(0, saved.delay_remaining_ms ?? 0),
-        baseScaleX, // ← fresh from factory, not from saved state
-        baseScaleY, // ← fresh from factory, not from saved state
+        baseScaleX,
+        baseScaleY,
         isBoss: Boolean(saved.is_boss),
         angle: Number.isFinite(saved.angle) ? saved.angle : 0,
         isExiting: Boolean(saved.is_exiting),
         exitTarget:
           Number.isFinite(saved.exit_target_x) &&
-          Number.isFinite(saved.exit_target_y)
+            Number.isFinite(saved.exit_target_y)
             ? new PIXI.Point(saved.exit_target_x!, saved.exit_target_y!)
             : undefined,
         exitSpeed:
@@ -1060,55 +1121,69 @@ export function createFishContextMachine(options: {
     };
   }
 
-  // function setPaused(paused: boolean) {
-  //   const now = performance.now();
-  //   if (paused) {
-  //     if (pausedAtMs != null) return;
-  //     pausedAtMs = now;
-  //     return;
-  //   }
+  function setPaused(paused: boolean) {
+    const now = performance.now();
+    if (paused) {
+      if (pausedAtMs != null) return;
+      pausedAtMs = now;
+      return;
+    }
 
-  //   if (pausedAtMs == null) return;
-  //   const pausedDuration = Math.max(0, now - pausedAtMs);
-  //   pausedAtMs = null;
+    if (pausedAtMs == null) return;
+    const pausedDuration = Math.max(0, now - pausedAtMs);
+    pausedAtMs = null;
 
-  //   // Shift all time references forward by pause duration
-  //   contextStartTime += pausedDuration;
+    // Shift all time references forward by pause duration
+    contextStartTime += pausedDuration;
 
-  //   if (pendingContextSwitch) {
-  //     pendingContextSwitch.activateAtMs += pausedDuration;
-  //   }
+    if (pendingContextSwitch) {
+      pendingContextSwitch.activateAtMs += pausedDuration;
+    }
 
-  //   // Clamp contextStartTime so elapsed never overshoots
-  //   // If the context would have expired during pause, reset it so it runs
-  //   // from a fresh start rather than immediately triggering scheduleNextContext
-  //   const resumeElapsed = performance.now() - contextStartTime;
-  //   if (resumeElapsed >= currentContextDurationMs) {
-  //     // Context expired while paused — reset start time to now
-  //     // This means the context gets a full fresh run instead of
-  //     // immediately scheduling the next one on the first tick
-  //     contextStartTime = performance.now();
-  //     spawnCursor = spawnEvents.length; // skip all pending spawns — already stale
-  //   }
+    // Clamp contextStartTime so elapsed never overshoots
+    const resumeElapsed = performance.now() - contextStartTime;
+    if (resumeElapsed >= currentContextDurationMs) {
+      contextStartTime = performance.now();
+      spawnCursor = spawnEvents.length;
+    }
 
-  //   // Skip any spawn events whose delay passed during pause
-  //   const spawnElapsedMs = Math.max(
-  //     0,
-  //     performance.now() - contextStartTime - leadInMs,
-  //   );
-  //   while (
-  //     spawnCursor < spawnEvents.length &&
-  //     (spawnEvents[spawnCursor]?.delayMs ?? Infinity) <= spawnElapsedMs
-  //   ) {
-  //     spawnCursor += 1;
-  //   }
-  // }
+    // Skip any spawn events whose delay passed during pause
+    const spawnElapsedMs = Math.max(
+      0,
+      performance.now() - contextStartTime - leadInMs,
+    );
+    while (
+      spawnCursor < spawnEvents.length &&
+      (spawnEvents[spawnCursor]?.delayMs ?? Infinity) <= spawnElapsedMs
+    ) {
+      spawnCursor += 1;
+    }
+  }
+
+  function removeLiveFish(fish: LiveFish) {
+    fishLayer.removeChild(fish.display);
+    fish.destroy();
+    if (perfOptions.enabled) {
+      perfStats.destroyed += 1;
+    }
+  }
 
   function updateFish(deltaMs: number) {
-    liveFish = liveFish.filter((fish) => {
+    const fishUpdateStart = perfOptions.enabled ? performance.now() : 0;
+    let writeIndex = 0;
+
+    for (let readIndex = 0; readIndex < liveFish.length; readIndex += 1) {
+      const fish = liveFish[readIndex];
+      if (!fish) continue;
+      let keepFish = true;
       fish.elapsedMs += deltaMs;
       if (fish.isExiting && fish.exitTarget && fish.exitSpeed) {
-        resetDisplayAnimationSpeed(fish.display);
+        if (perfOptions.disableFishAnimation) {
+          setDisplayAnimationSpeed(fish.display, 0);
+        } else {
+          resetDisplayAnimationSpeed(fish.display);
+        }
+        const moveStart = perfOptions.enabled ? performance.now() : 0;
         const dx = fish.exitTarget.x - fish.display.position.x;
         const dy = fish.exitTarget.y - fish.display.position.y;
         const dist = Math.hypot(dx, dy);
@@ -1129,23 +1204,37 @@ export function createFishContextMachine(options: {
             fish.display.rotation = fish.angle;
           }
         }
+        if (perfOptions.enabled) {
+          perfStats.fishMovementMs += performance.now() - moveStart;
+        }
       } else {
         if (fish.segmentIndex >= fish.segments.length) {
-          fishLayer.removeChild(fish.display);
-          fish.destroy();
-          return false;
+          removeLiveFish(fish);
+          keepFish = false;
+        }
+
+        if (!keepFish) {
+          continue;
         }
 
         if (fish.delayRemainingMs > 0) {
-          resetDisplayAnimationSpeed(fish.display);
+          if (perfOptions.disableFishAnimation) {
+            setDisplayAnimationSpeed(fish.display, 0);
+          } else {
+            resetDisplayAnimationSpeed(fish.display);
+          }
           fish.delayRemainingMs = Math.max(0, fish.delayRemainingMs - deltaMs);
         } else {
           const segment = fish.segments[fish.segmentIndex];
           if (!segment) {
-            fishLayer.removeChild(fish.display);
-            fish.destroy();
-            return false;
+            removeLiveFish(fish);
+            keepFish = false;
           }
+
+          if (!keepFish || !segment) {
+            continue;
+          }
+          const moveStart = perfOptions.enabled ? performance.now() : 0;
           const durationMs = Math.max(1, segment.durationMs);
           fish.segmentElapsedMs = Math.min(
             fish.segmentElapsedMs + deltaMs,
@@ -1153,12 +1242,13 @@ export function createFishContextMachine(options: {
           );
           const t =
             segment.durationMs <= 0 ? 1 : fish.segmentElapsedMs / durationMs;
-          const point = bezierPoint(
+          const point = bezierPointInto(
             segment.p0,
             segment.p1,
             segment.p2,
             segment.p3,
             t,
+            bezierScratch,
           );
           const direction = bezierTangent(
             segment.p0,
@@ -1170,7 +1260,9 @@ export function createFishContextMachine(options: {
 
           setDisplayAnimationSpeed(
             fish.display,
-            getWalkAdjustedAnimationSpeed(fish, segment),
+            perfOptions.disableFishAnimation
+              ? 0
+              : getWalkAdjustedAnimationSpeed(fish, segment),
           );
 
           fish.display.position.set(point.x, point.y);
@@ -1192,7 +1284,39 @@ export function createFishContextMachine(options: {
             const nextSegment = fish.segments[fish.segmentIndex];
             fish.delayRemainingMs = nextSegment?.delayMs ?? 0;
           }
+          if (perfOptions.enabled) {
+            perfStats.fishMovementMs += performance.now() - moveStart;
+          }
         }
+      }
+
+      // Drive Spine's skeleton update manually, once per fish per frame,
+      // from this single loop instead of letting each Spine instance run
+      // its own independent ticker (disabled via autoUpdate = false in
+      // useFishRendererFactory.ts). AnimatedSprite doesn't need this —
+      // it already advances frames cheaply via its own .play() ticker
+      // hook, which is not the expensive part.
+      const tagged = fish.display as PIXI.DisplayObject & {
+        __anim?: PIXI.DisplayObject & { update?: (dt: number) => void };
+        __shadowAnim?: PIXI.DisplayObject & { update?: (dt: number) => void };
+      };
+      const deltaSeconds = deltaMs / 1000;
+      countFishRenderer(fish.display);
+      const shouldUpdateSpine =
+        !perfOptions.disableFishAnimation &&
+        !perfOptions.disableSpineAnimation;
+      const spineStart = perfOptions.enabled ? performance.now() : 0;
+      if (shouldUpdateSpine && typeof tagged.__anim?.update === "function") {
+        tagged.__anim.update(deltaSeconds);
+      }
+      if (
+        shouldUpdateSpine &&
+        typeof tagged.__shadowAnim?.update === "function"
+      ) {
+        tagged.__shadowAnim.update(deltaSeconds);
+      }
+      if (perfOptions.enabled) {
+        perfStats.spineUpdateMs += performance.now() - spineStart;
       }
 
       const isOutOfScreen =
@@ -1202,30 +1326,37 @@ export function createFishContextMachine(options: {
         fish.display.position.y > GAME_HEIGHT + 200;
 
       if (!fish.isExiting && fish.segmentIndex >= fish.segments.length) {
-        fishLayer.removeChild(fish.display);
-        fish.destroy();
+        removeLiveFish(fish);
         if (fish.isBoss) {
           releaseBossSlot();
         }
-        return false;
+        continue;
       }
 
       if (fish.isExiting && isOutOfScreen) {
-        fishLayer.removeChild(fish.display);
-        fish.destroy();
+        removeLiveFish(fish);
         if (fish.isBoss) {
           releaseBossSlot();
         }
-        return false;
+        continue;
       }
 
-      return true;
-    });
+      liveFish[writeIndex] = fish;
+      writeIndex += 1;
+    }
+
+    liveFish.length = writeIndex;
+    if (perfOptions.enabled) {
+      perfStats.liveFish = liveFish.length;
+      perfStats.fishUpdateMs += performance.now() - fishUpdateStart;
+    }
   }
 
   function tick() {
     if (pausedAtMs != null) return;
     if (currentContextIndex < 0) return;
+    resetPerfFrame();
+    const tickStart = perfOptions.enabled ? performance.now() : 0;
 
     const elapsedMs = performance.now() - contextStartTime;
     const spawnElapsedMs = Math.max(0, elapsedMs - leadInMs);
@@ -1249,6 +1380,9 @@ export function createFishContextMachine(options: {
             pendingContextSwitch = null;
           });
       }
+      if (perfOptions.enabled) {
+        perfStats.tickMs = performance.now() - tickStart;
+      }
       return;
     }
 
@@ -1271,11 +1405,23 @@ export function createFishContextMachine(options: {
     updateFish(deltaMs);
 
     if (bossTimers.length > 0) {
-      bossTimers = bossTimers
-        .map((timer) => ({ remainingMs: timer.remainingMs - deltaMs }))
-        .filter((timer) => timer.remainingMs > 0);
+      const bossTimerStart = perfOptions.enabled ? performance.now() : 0;
+      let writeIndex = 0;
+      for (let readIndex = 0; readIndex < bossTimers.length; readIndex += 1) {
+        const timer = bossTimers[readIndex];
+        if (!timer) continue;
+        timer.remainingMs -= deltaMs;
+        if (timer.remainingMs > 0) {
+          bossTimers[writeIndex] = timer;
+          writeIndex += 1;
+        }
+      }
+      bossTimers.length = writeIndex;
       while (bossActiveCount > bossTimers.length && bossTimers.length === 0) {
         releaseBossSlot();
+      }
+      if (perfOptions.enabled) {
+        perfStats.bossTimerMs += performance.now() - bossTimerStart;
       }
     }
 
@@ -1289,6 +1435,9 @@ export function createFishContextMachine(options: {
         });
       }
       scheduleNextContext(currentContextIndex + 1);
+    }
+    if (perfOptions.enabled) {
+      perfStats.tickMs = performance.now() - tickStart;
     }
   }
 
@@ -1342,7 +1491,7 @@ export function createFishContextMachine(options: {
       bossActiveCount = restoredBossFish.length;
       bossSceneLock =
         initialRuntimeState?.boss_scene_lock_id &&
-        initialRuntimeState.boss_scene_lock_id.length > 0
+          initialRuntimeState.boss_scene_lock_id.length > 0
           ? initialRuntimeState.boss_scene_lock_id
           : (BOSS_SCENE_BY_FISH_ID[restoredBossFish[0]!.fishId] ?? null);
     } else if (
@@ -1477,7 +1626,7 @@ export function createFishContextMachine(options: {
             startY -
             SHOCK_LIFT +
             (SHOCK_LIFT + BOUNCE_DEPTH) * easeInOut(t / 0.78);
-        } else { 
+        } else {
           obj.y = startY + BOUNCE_DEPTH * (1 - easeOut((t - 0.78) / 0.22));
         }
         obj.rotation = startRot + Math.sin(t * Math.PI * 3) * 0.04 * (1 - t);
@@ -1504,7 +1653,10 @@ export function createFishContextMachine(options: {
           if (!anim.playing) anim.play();
         } else if (isSpineDisplay(anim)) {
           (anim as any).state.timeScale = targetSpeed;
-          // ensure spine keeps ticking through the panic phase
+          // Re-enable autoUpdate here specifically: this fish has already
+          // been removed from liveFish above, so updateFish() will no
+          // longer drive its .update() manually. Without autoUpdate the
+          // skeleton would freeze mid-panic-animation.
           (anim as any).autoUpdate = true;
         }
       }
@@ -1529,6 +1681,7 @@ export function createFishContextMachine(options: {
     destroy,
     playKillAnimationForDisplay,
     getRuntimeState: buildRuntimeStateSnapshot,
-    // setPaused,
+    getPerfStats,
+    setPaused,
   };
 }

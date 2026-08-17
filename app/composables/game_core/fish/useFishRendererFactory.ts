@@ -106,6 +106,7 @@ function buildShadowSpine(
   timeScale: number,
 ): Spine {
   const shadow = new Spine(spineData as never);
+  shadow.autoUpdate = false;
   shadow.alpha = 0.25;
   (shadow as unknown as { tint?: number }).tint = 0x000000;
   shadow.skeleton?.setToSetupPose?.();
@@ -239,6 +240,7 @@ export function createFishRendererFactory(options: {
       if (!spineData || typeof spineData !== "object") return null;
 
       const spine = new Spine(spineData as never);
+      spine.autoUpdate = false;
       const scale = getFishScale(spawnFishId);
       const anim = stateName ?? fishEntry.default_state_code ?? "run";
       const animationSpeed = getFishAnimationSpeed(spawnFishId, "spine");
@@ -261,6 +263,7 @@ export function createFishRendererFactory(options: {
         __anim?: PIXI.DisplayObject;
         __shadowAnim?: PIXI.DisplayObject;
         __baseAnimSpeed?: number;
+        __collisionRadius?: number;
       };
       wrapper.__spineUpright = true;
       wrapper.__fishId = spawnFishId;
@@ -271,6 +274,9 @@ export function createFishRendererFactory(options: {
       wrapper.addChild(spine);
       wrapper.scale.set(scale);
       wrapper.zIndex = getFishZOrder(spawnFishId);
+      const localBounds = wrapper.getLocalBounds();
+      wrapper.__collisionRadius =
+        Math.max(localBounds.width, localBounds.height) * 0.35;
 
       return {
         display: wrapper,
@@ -300,6 +306,7 @@ export function createFishRendererFactory(options: {
       __anim?: PIXI.DisplayObject;
       __shadowAnim?: PIXI.DisplayObject;
       __baseAnimSpeed?: number;
+      __collisionRadius?: number;
     };
     wrapper.__fishId = spawnFishId;
     wrapper.__anim = sprite;
@@ -309,6 +316,9 @@ export function createFishRendererFactory(options: {
     wrapper.addChild(sprite);
     wrapper.scale.set(getFishScale(spawnFishId));
     wrapper.zIndex = getFishZOrder(spawnFishId);
+    const localBounds = wrapper.getLocalBounds();
+    wrapper.__collisionRadius =
+      Math.max(localBounds.width, localBounds.height) * 0.35;
 
     return {
       display: wrapper,
