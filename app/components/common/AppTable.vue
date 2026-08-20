@@ -1,5 +1,5 @@
 <template>
-  <div class="app-table-wrapper ">
+  <div class="app-table-wrapper">
     <v-table class="app-table" fixed-header :height="tableHeight">
       <thead>
         <tr>
@@ -24,7 +24,7 @@
         <tr v-else-if="error" class="no-hover">
           <td :colspan="columns.length" class="empty-cell">
             <div class="empty-state">
-              <v-icon size="40" color="#E53935">mdi-alert-circle-outline</v-icon>
+              <v-icon size="40" color="#FF6B4A">mdi-alert-circle-outline</v-icon>
               <div class="empty-text error-text">{{ error }}</div>
             </div>
           </td>
@@ -206,51 +206,66 @@ function getColStyle(col: TableColumn<T>, isBody = false): string {
 
 <style scoped>
 
+.app-table-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  /* background: rgba(4, 20, 30, 0.55); */
+  border-radius: 14px;
+}
+
 .app-table {
   background: transparent !important;
-  border-radius: 12px;
   overflow: hidden;
-  border: 1px solid rgba(var(--v-theme-secondary), 0.3);
+  border: none;
 }
 
 .app-table :deep(table) {
   height: 100%;
+  border-collapse: collapse;
 }
 
 .app-table :deep(tbody) {
   height: 100%;
 }
 
-.app-table-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.app-table {
-  background: transparent !important;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid rgba(var(--v-theme-secondary), 0.3);
+.app-table :deep(thead) {
+  position: sticky;
+  top: 0;
+  z-index: 3;
 }
 
 .app-table :deep(thead th) {
-  background: rgb(var(--v-theme-primary)) !important;
-  color: #fff !important;
+  /* fully opaque — a translucent sticky header lets scrolled rows ghost through it */
+  background: #0b3448 !important;
+  background-image: linear-gradient(180deg, #12495f, #0a2c3d) !important;
+  color: #d8fbff !important;
   font-weight: 700 !important;
   font-size: 12px !important;
   text-align: center !important;
-  border: 1.5px solid rgb(var(--v-theme-secondary)) !important;
+  border: 1px solid rgba(56, 232, 255, 0.35) !important;
   white-space: nowrap;
-  padding: 6px 10px !important;
+  /* padding: 6px 10px !important; */
   line-height: 1.2 !important;
-  height: 36px !important;
+  height: 50px !important;
+  text-shadow: 0 0 8px rgba(56, 232, 255, 0.4);
+  position: relative;
+  z-index: 3;
+}
+
+.app-table :deep(thead th)::before {
+  /* extra opaque backing layer so nothing behind can bleed through at the edges */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #0b3448;
+  z-index: -1;
 }
 
 .app-table :deep(tbody td) {
-  background: rgb(var(--v-theme-surface)) !important;
-  color: rgb(var(--v-theme-on-surface)) !important;
-  border: 1px solid rgba(var(--v-theme-secondary), 0.25) !important;
+  background: rgba(6, 26, 38, 0.7) !important;
+  color: #eaf9ff !important;
+  border: 1px solid rgba(56, 232, 255, 0.18) !important;
   text-align: center !important;
   font-size: 12px !important;
   padding: 4px 10px !important;
@@ -261,24 +276,31 @@ function getColStyle(col: TableColumn<T>, isBody = false): string {
   overflow: hidden;
 }
 
+/* subtle alternating row tint, like the reef-glow rows in game UI */
+.app-table :deep(tbody tr:nth-child(even) td) {
+  background: rgba(10, 34, 48, 0.7) !important;
+}
+
 .app-table :deep(tbody td.positive) {
-  color: rgb(var(--v-theme-success)) !important;
+  color: #4ADE80 !important;
   font-weight: 700 !important;
+  text-shadow: 0 0 8px rgba(74, 222, 128, 0.35);
 }
 
 .app-table :deep(tbody td.negative) {
-  color: rgb(var(--v-theme-warning)) !important;
+  color: #FF9142 !important;
   font-weight: 700 !important;
+  text-shadow: 0 0 8px rgba(255, 145, 66, 0.35);
 }
 
 .app-table :deep(tbody tr:hover td) {
-  background: rgba(var(--v-theme-primary), 0.12) !important;
+  background: rgba(56, 232, 255, 0.14) !important;
   transition: background 0.2s ease;
 }
 
 /* ── No hover for state rows ── */
 .app-table :deep(tbody tr.no-hover:hover td) {
-  background: rgb(var(--v-theme-surface)) !important;
+  background: rgba(6, 26, 38, 0.7) !important;
   cursor: default;
 }
 
@@ -292,7 +314,7 @@ function getColStyle(col: TableColumn<T>, isBody = false): string {
 }
 
 .skeleton-cell :deep(.v-skeleton-loader__bone) {
-  background: rgba(var(--v-theme-secondary), 0.18) !important;
+  background: rgba(56, 232, 255, 0.16) !important;
   margin: 0 auto;
   height: 14px;
   border-radius: 4px;
@@ -300,18 +322,10 @@ function getColStyle(col: TableColumn<T>, isBody = false): string {
 
 /* ── Empty state ── */
 .empty-cell {
-  background: rgb(var(--v-theme-surface)) !important;
+  background: rgba(6, 26, 38, 0.7) !important;
   padding: 0 !important;
   border: none !important;
-  height: 1px;
-}
-
-
-.empty-cell {
-  background: rgb(var(--v-theme-surface)) !important;
-  padding: 0 !important;
-  border: none !important;
-  height: 100%; /* was height: 1px */
+  height: 100%;
 }
 
 .empty-state {
@@ -321,8 +335,8 @@ function getColStyle(col: TableColumn<T>, isBody = false): string {
   justify-content: center;
   gap: 12px;
   padding: 48px 24px;
-  background: rgb(var(--v-theme-surface));
-  height: 100%; /* was min-height: 340px */
+  background: rgba(6, 26, 38, 0.7);
+  height: 100%;
   box-sizing: border-box;
 }
 
@@ -336,8 +350,12 @@ function getColStyle(col: TableColumn<T>, isBody = false): string {
 .empty-text {
   font-size: 22px;
   font-weight: 600;
-  color: rgb(var(--v-theme-primary));
-  opacity: 0.7;
+  color: #7fe8f5;
+  opacity: 0.8;
+}
+
+.error-text {
+  color: #FF9142;
 }
 
 /* ── Pagination ── */
@@ -350,9 +368,9 @@ function getColStyle(col: TableColumn<T>, isBody = false): string {
 .pagination :deep(.v-pagination__item button),
 .pagination :deep(.v-pagination__prev button),
 .pagination :deep(.v-pagination__next button) {
-  background: rgb(var(--v-theme-surface)) !important;
-  color: rgb(var(--v-theme-primary)) !important;
-  border: 1px solid rgb(var(--v-theme-secondary)) !important;
+  background: rgba(6, 26, 38, 0.8) !important;
+  color: #9fe9f5 !important;
+  border: 1.5px solid rgba(56, 232, 255, 0.5) !important;
   width: 28px !important;
   height: 28px !important;
   min-width: 28px !important;
@@ -360,16 +378,17 @@ function getColStyle(col: TableColumn<T>, isBody = false): string {
 }
 
 .pagination :deep(.v-pagination__item--is-active button) {
-  background: rgb(var(--v-theme-primary)) !important;
-  color: rgb(var(--v-theme-on-primary)) !important;
-  border-color: rgb(var(--v-theme-secondary)) !important;
+  background: linear-gradient(180deg, #4de8ff, #17b9d6) !important;
+  color: #04222c !important;
+  border-color: #4de8ff !important;
+  box-shadow: 0 0 10px rgba(56, 232, 255, 0.6);
 }
 
 .pagination :deep(.v-pagination__item button:hover),
 .pagination :deep(.v-pagination__prev button:hover),
 .pagination :deep(.v-pagination__next button:hover) {
-  background: rgba(var(--v-theme-primary), 0.14) !important;
-  color: rgb(var(--v-theme-primary)) !important;
+  background: rgba(56, 232, 255, 0.18) !important;
+  color: #d8fbff !important;
 }
 
 .pagination :deep(.v-pagination__prev button),
@@ -383,31 +402,33 @@ function getColStyle(col: TableColumn<T>, isBody = false): string {
 .pagination :deep(.v-pagination__next .v-icon) {
   font-size: 16px !important;
 }
+
 /* ── Summary rows ── */
 .app-table :deep(tbody tr.summary-row td) {
-  background: rgba(var(--v-theme-primary), 0.10) !important;
+  background: rgba(56, 232, 255, 0.14) !important;
   font-weight: 700 !important;
+  color: #eaf9ff !important;
 }
 
 .app-table :deep(tbody tr.grand-total-row td) {
-  background: rgba(var(--v-theme-primary), 0.20) !important;
+  background: rgba(56, 232, 255, 0.24) !important;
 }
 
 .app-table :deep(tbody tr.summary-row td.summary-label) {
   text-align: right !important;
-  color: rgb(var(--v-theme-primary)) !important;
+  color: #7fe8f5 !important;
   padding-right: 12px !important;
 }
 
 .app-table :deep(tbody tr.summary-row td.positive),
 .app-table :deep(tbody tr.grand-total-row td.positive) {
-  color: rgb(var(--v-theme-success)) !important;
+  color: #4ADE80 !important;
   font-weight: 700 !important;
 }
 
 .app-table :deep(tbody tr.summary-row td.negative),
 .app-table :deep(tbody tr.grand-total-row td.negative) {
-  color: rgb(var(--v-theme-warning)) !important;
+  color: #FF9142 !important;
   font-weight: 700 !important;
 }
 </style>

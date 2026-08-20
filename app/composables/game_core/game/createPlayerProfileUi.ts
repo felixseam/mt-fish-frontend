@@ -16,9 +16,9 @@ const COLOR = {
   innerBg:       0x112233,   // slightly lighter inner panels
   innerStroke:   0x1a4a7a,   // neon-blue tint border
   accentGlow:    0x00d4ff,   // cyan neon accent
-  accentAlt:     0xffc857,   // warm gold for coins
+  accentAlt:     0xffc857,   // warm gold for balance
   textPrimary:   0xe8f4fd,   // near-white
-  textCoin:      0xffc857,   // gold
+  textCoin:      0xffc857,   // gold (kept name for minimal diff elsewhere)
   ringInner:     0x00d4ff,
   ringOuter:     0x0066aa,
   avatarShadow:  0x00d4ff,
@@ -27,13 +27,20 @@ const COLOR = {
 const CORNER_RADIUS = 16;
 const INNER_CORNER  = 10;
 
+export interface ProfileBalanceItem {
+  currencyId: number;
+  code: string;
+  amount: number;
+}
+
 export async function createPlayerProfileUi(
   initialAvatarPath: string = "/avatar/Avatar6.png",
   allAvatarPaths: string[] = [...DEFAULT_AVATAR_URLS],
   initialUsername: string = "Player",
   avatarClickCb?: () => void,
   options?: {
-    initialCoins?: number;
+    initialBalances?: ProfileBalanceItem[];
+    initialCurrencyId?: number;
     getAtlasTexture?: (atlasUrl: string, frame: string) => PIXI.Texture;
   },
 ) {
@@ -67,7 +74,6 @@ export async function createPlayerProfileUi(
 
   const usernameFontSize = isTouchLike ? 20 : 17;
   const coinFontSize     = isTouchLike ? 21 : 18;
-  const coinIconSize     = isTouchLike ? 26 : 22;
 
   // ── Helpers ─────────────────────────────────────────────────────────────
   const normalizeAvatarPath = (path: string) =>
@@ -83,8 +89,6 @@ export async function createPlayerProfileUi(
     }
     return PIXI.Texture.EMPTY;
   };
-
-  const coinIconTexture = getAtlas("ui/coin.png");
 
   // ── Root container ───────────────────────────────────────────────────────
   const rootContainer = new PIXI.Container();
@@ -220,51 +224,200 @@ export async function createPlayerProfileUi(
 
   rootContainer.addChild(usernameText);
 
-  // ── 5. Coin sub-panel ─────────────────────────────────────────────────────
-  const coinBox = new PIXI.Graphics();
-  drawPanel(coinBox, innerX, innerCoinY, innerW, innerCoinH, INNER_CORNER,
+  // ── 5. Balance dropdown panel ─────────────────────────────────────────────
+  const balanceBox = new PIXI.Graphics();
+  drawPanel(balanceBox, innerX, innerCoinY, innerW, innerCoinH, INNER_CORNER,
     COLOR.innerBg, 0.85, COLOR.accentAlt, 0.7);
-  rootContainer.addChild(coinBox);
+  rootContainer.addChild(balanceBox);
 
-  // Gold left-edge accent bar on coin panel
-  const coinAccent = new PIXI.Graphics();
-  coinAccent.beginFill(COLOR.accentAlt, 0.95);
-  coinAccent.drawRoundedRect(innerX + 1, innerCoinY + 6, 3, innerCoinH - 12, 2);
-  coinAccent.endFill();
-  rootContainer.addChild(coinAccent);
+  // Gold left-edge accent bar on balance panel
+  const balanceAccent = new PIXI.Graphics();
+  balanceAccent.beginFill(COLOR.accentAlt, 0.95);
+  balanceAccent.drawRoundedRect(innerX + 1, innerCoinY + 6, 3, innerCoinH - 12, 2);
+  balanceAccent.endFill();
+  rootContainer.addChild(balanceAccent);
 
-  const coinRowY = innerCoinY + innerCoinH / 2;
+  const balanceRowY = innerCoinY + innerCoinH / 2;
 
-  const coinIconSprite = new PIXI.Sprite(coinIconTexture);
-  coinIconSprite.anchor.set(0, 0.5);
-  coinIconSprite.width  = coinIconSize;
-  coinIconSprite.height = coinIconSize;
-  coinIconSprite.position.set(innerX + 10, coinRowY);
-  rootContainer.addChild(coinIconSprite);
+  // Small currency code label, top-left of the panel (e.g. "USD")
+  const balanceCodeText = new PIXI.Text("", {
+    fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
+    fontSize: Math.round(coinFontSize * 0.6),
+    fontWeight: "bold",
+    fill: 0xffffff,
+  });
+  balanceCodeText.alpha = 0.55;
+  balanceCodeText.anchor.set(0, 0);
+  balanceCodeText.position.set(innerX + 10, innerCoinY + 4);
+  rootContainer.addChild(balanceCodeText);
 
-  const coinText = new PIXI.Text(
-    (options?.initialCoins ?? 0).toLocaleString("en-US"),
-    {
-      fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
-      fontSize: coinFontSize,
-      fontWeight: "bold",
-      fill: COLOR.textCoin,
-      dropShadow: true,
-      dropShadowColor: 0xffaa00,
-      dropShadowBlur: 8,
-      dropShadowDistance: 0,
-      dropShadowAlpha: 0.6,
-    },
-  );
-  coinText.anchor.set(0, 0.5);
-  coinText.position.set(innerX + coinIconSize + 16, coinRowY);
+  // Main balance amount
+  const balanceAmountText = new PIXI.Text("0", {
+    fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
+    fontSize: coinFontSize,
+    fontWeight: "bold",
+    fill: COLOR.textCoin,
+    dropShadow: true,
+    dropShadowColor: 0xffaa00,
+    dropShadowBlur: 8,
+    dropShadowDistance: 0,
+    dropShadowAlpha: 0.6,
+  });
+  balanceAmountText.anchor.set(0, 0.5);
+  balanceAmountText.position.set(innerX + 10, balanceRowY + 4);
+  rootContainer.addChild(balanceAmountText);
 
-  const coinTextMaxW = innerW - coinIconSize - 20 - 8;
-  if (coinText.width > coinTextMaxW) {
-    coinText.scale.set(coinTextMaxW / coinText.width);
+  // Dropdown caret, right edge of the panel
+  const dropdownCaret = new PIXI.Graphics();
+  dropdownCaret.beginFill(0xffffff, 0.7);
+  dropdownCaret.moveTo(0, 0).lineTo(8, 0).lineTo(4, 5).closePath();
+  dropdownCaret.endFill();
+  dropdownCaret.position.set(innerX + innerW - 18, balanceRowY - 2);
+  dropdownCaret.pivot.set(4, 2.5);
+  dropdownCaret.position.set(innerX + innerW - 14, balanceRowY);
+  rootContainer.addChild(dropdownCaret);
+
+  // Hit area covering the whole balance panel — tap toggles the dropdown.
+  const balanceHitArea = new PIXI.Graphics();
+  balanceHitArea.beginFill(0xffffff, 0.001);
+  balanceHitArea.drawRoundedRect(innerX, innerCoinY, innerW, innerCoinH, INNER_CORNER);
+  balanceHitArea.endFill();
+  balanceHitArea.eventMode = "static";
+  balanceHitArea.cursor = "pointer";
+  rootContainer.addChild(balanceHitArea);
+
+  // ── Dropdown list (positioned just under the balance panel) ────────────────
+  const dropdownList = new PIXI.Container();
+  dropdownList.visible = false;
+  dropdownList.alpha = 0;
+  dropdownList.position.set(innerX, innerCoinY + innerCoinH + 4);
+  // Rendered on top of everything else in the profile UI.
+  rootContainer.addChild(dropdownList);
+
+  const ROW_H = isTouchLike ? 34 : 28;
+
+  let balances: ProfileBalanceItem[] = options?.initialBalances ?? [];
+  let selectedCurrencyId: number | null =
+    options?.initialCurrencyId ?? balances[0]?.currencyId ?? null;
+  let dropdownOpen = false;
+  let onCurrencyChangeCb: ((currencyId: number) => void) | null = null;
+
+  function formatAmount(amount: number): string {
+    return Math.round(amount).toLocaleString("en-US");
   }
 
-  rootContainer.addChild(coinText);
+  function currentBalance(): ProfileBalanceItem | null {
+    return balances.find(b => b.currencyId === selectedCurrencyId) ?? balances[0] ?? null;
+  }
+
+  function refreshBalanceDisplay() {
+    const b = currentBalance();
+    balanceCodeText.text = b?.code ?? "";
+    balanceAmountText.text = b ? formatAmount(b.amount) : "0";
+    balanceAmountText.scale.set(1);
+    const maxW = innerW - 28;
+    if (balanceAmountText.width > maxW) {
+      balanceAmountText.scale.set(maxW / balanceAmountText.width);
+    }
+    dropdownCaret.visible = balances.length > 1;
+  }
+
+  function buildDropdownRows() {
+    dropdownList.removeChildren();
+    if (!balances.length) return;
+
+    const listW = innerW;
+    const listH = balances.length * ROW_H;
+
+    const bg = new PIXI.Graphics();
+    drawPanel(bg, 0, 0, listW, listH, INNER_CORNER, COLOR.innerBg, 0.97, COLOR.innerStroke, 1);
+    dropdownList.addChild(bg);
+
+    balances.forEach((b, i) => {
+      const rowY = i * ROW_H;
+      const isSelected = b.currencyId === selectedCurrencyId;
+
+      const rowHit = new PIXI.Graphics();
+      rowHit.beginFill(isSelected ? COLOR.accentAlt : 0xffffff, isSelected ? 0.1 : 0.001);
+      rowHit.drawRect(0, rowY, listW, ROW_H);
+      rowHit.endFill();
+      rowHit.eventMode = "static";
+      rowHit.cursor = "pointer";
+      rowHit.on("pointertap", (e: FederatedPointerEvent) => {
+        e.stopPropagation();
+        selectedCurrencyId = b.currencyId;
+        refreshBalanceDisplay();
+        closeDropdown();
+        onCurrencyChangeCb?.(b.currencyId);
+      });
+      dropdownList.addChild(rowHit);
+
+      const rowCode = new PIXI.Text(b.code, {
+        fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
+        fontSize: Math.round(coinFontSize * 0.55),
+        fontWeight: "bold",
+        fill: isSelected ? COLOR.textCoin : COLOR.textPrimary,
+      });
+      rowCode.anchor.set(0, 0.5);
+      rowCode.position.set(10, rowY + ROW_H / 2);
+      dropdownList.addChild(rowCode);
+
+      const rowAmount = new PIXI.Text(formatAmount(b.amount), {
+        fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
+        fontSize: Math.round(coinFontSize * 0.55),
+        fontWeight: "bold",
+        fill: isSelected ? COLOR.textCoin : COLOR.textPrimary,
+      });
+      rowAmount.anchor.set(1, 0.5);
+      rowAmount.position.set(listW - 10, rowY + ROW_H / 2);
+      dropdownList.addChild(rowAmount);
+
+      if (i > 0) {
+        const sep = new PIXI.Graphics();
+        sep.lineStyle(1, COLOR.innerStroke, 0.6);
+        sep.moveTo(8, rowY).lineTo(listW - 8, rowY);
+        dropdownList.addChild(sep);
+      }
+    });
+  }
+
+  function closeDropdown() {
+    if (!dropdownOpen) return;
+    dropdownOpen = false;
+    gsap.to(dropdownList, {
+      alpha: 0,
+      duration: 0.15,
+      onComplete: () => { dropdownList.visible = false; },
+    });
+    gsap.to(dropdownCaret, { rotation: 0, duration: 0.15 });
+  }
+
+  function openDropdown() {
+    if (dropdownOpen || balances.length <= 1) return;
+    dropdownOpen = true;
+    buildDropdownRows();
+    dropdownList.visible = true;
+    dropdownList.alpha = 0;
+    gsap.to(dropdownList, { alpha: 1, duration: 0.15 });
+    gsap.to(dropdownCaret, { rotation: Math.PI, duration: 0.15 });
+  }
+
+  function toggleDropdown() {
+    if (dropdownOpen) closeDropdown();
+    else openDropdown();
+  }
+
+  balanceHitArea.on("pointertap", (e: FederatedPointerEvent) => {
+    e.stopPropagation();
+    toggleDropdown();
+  });
+
+  balanceHitArea.on("pointerover", () => {
+    gsap.to(balanceBox, { alpha: 1, duration: 0.15 });
+  });
+
+  // Initial paint
+  refreshBalanceDisplay();
 
   // ── 6. Avatar hit area ────────────────────────────────────────────────────
   const avatarHitArea = new PIXI.Graphics();
@@ -276,6 +429,7 @@ export async function createPlayerProfileUi(
 
   avatarHitArea.on("pointerdown", (e: FederatedPointerEvent) => {
     e.stopPropagation();
+    closeDropdown();
     const origSX = avatarSprite.scale.x;
     const origSY = avatarSprite.scale.y;
     gsap.fromTo(
@@ -302,17 +456,6 @@ export async function createPlayerProfileUi(
 
   rootContainer.addChild(avatarHitArea);
 
-  // ── Coin change effects ───────────────────────────────────────────────────
-  let currentCoins = options?.initialCoins ?? 0;
-  let coinTween: gsap.core.Tween | null = null;
-
-  function _refreshCoinText(value: number) {
-    coinText.text = Math.round(value).toLocaleString("en-US");
-    coinText.scale.set(1);
-    const maxW = innerW - coinIconSize - 20 - 8;
-    if (coinText.width > maxW) coinText.scale.set(maxW / coinText.width);
-  }
-
   // ── Public API ────────────────────────────────────────────────────────────
   function setAvatar(path: string) {
     const tex = resolveAvatarTexture(path);
@@ -327,41 +470,35 @@ export async function createPlayerProfileUi(
     if (usernameText.width > maxW) usernameText.scale.set(maxW / usernameText.width);
   }
 
-  function setCoins(amount: number) {
-    const previous = currentCoins;
-    const delta    = amount - previous;
-    if (delta === 0) return;
-    currentCoins = amount;
+  /**
+   * Replace the full balance list (call this whenever wallet balances
+   * change, e.g. after a bet, deposit, or websocket balance push).
+   * `activeCurrencyId` optionally forces which balance is shown/selected;
+   * otherwise the previously selected currency is kept if still present,
+   * falling back to the first balance.
+   */
+  function setBalances(next: ProfileBalanceItem[], activeCurrencyId?: number) {
+    balances = next;
 
-    const isGain = delta > 0;
+    if (activeCurrencyId != null && balances.some(b => b.currencyId === activeCurrencyId)) {
+      selectedCurrencyId = activeCurrencyId;
+    } else if (selectedCurrencyId == null || !balances.some(b => b.currencyId === selectedCurrencyId)) {
+      selectedCurrencyId = balances[0]?.currencyId ?? null;
+    }
 
-    // ── 1. Count-up / count-down tween ──────────────────────────────────────
-    coinTween?.kill();
-    const counter = { value: previous };
-    coinTween = gsap.to(counter, {
-      value: amount,
-      duration: 0.7,
-      ease: "power2.out",
-      onUpdate: () => _refreshCoinText(counter.value),
-    });
+    refreshBalanceDisplay();
 
-    // ── 2. Scale bounce on coinText ──────────────────────────────────────────
-    gsap.fromTo(
-      coinText.scale,
-      { x: isGain ? 1.35 : 0.85, y: isGain ? 1.35 : 0.85 },
-      { x: 1, y: 1, duration: 0.45, ease: "elastic.out(1, 0.5)" },
-    );
-
-    // ── 3. Panel border flash (always gold) ──────────────────────────────────
+    // Bounce the panel border briefly so balance updates are noticeable,
+    // similar to the old coin-change flash.
     const flashObj = { v: 1 };
     gsap.to(flashObj, {
       v: 0,
       duration: 0.5,
       ease: "power2.out",
       onUpdate: () => {
-        coinBox.clear();
+        balanceBox.clear();
         drawPanel(
-          coinBox,
+          balanceBox,
           innerX, innerCoinY, innerW, innerCoinH, INNER_CORNER,
           COLOR.innerBg, 0.85,
           COLOR.accentAlt, 0.7 + flashObj.v * 2,
@@ -369,21 +506,40 @@ export async function createPlayerProfileUi(
       },
     });
 
-    // ── 4. Coin icon spin ────────────────────────────────────────────────────
-    gsap.fromTo(
-      coinIconSprite,
-      { rotation: 0 },
-      { rotation: Math.PI * 2, duration: 0.5, ease: "power2.inOut" },
-    );
+    if (dropdownOpen) buildDropdownRows();
+  }
 
+  /** Update just one currency's amount without touching selection/order. */
+  function updateBalanceAmount(currencyId: number, amount: number) {
+    const existing = balances.find(b => b.currencyId === currencyId);
+    if (existing) {
+      existing.amount = amount;
+    } else {
+      balances = [...balances, { currencyId, code: String(currencyId), amount }];
+    }
+    refreshBalanceDisplay();
+    if (dropdownOpen) buildDropdownRows();
+  }
+
+  function getSelectedCurrencyId(): number | null {
+    return selectedCurrencyId;
+  }
+
+  function getSelectedBalance(): ProfileBalanceItem | null {
+    return currentBalance();
+  }
+
+  /** Fires whenever the user picks a different currency from the dropdown. */
+  function onSelectCurrency(cb: (currencyId: number) => void) {
+    onCurrencyChangeCb = cb;
   }
 
   function destroy() {
-    coinTween?.kill();
-
     avatarHitArea.off("pointerdown");
     avatarHitArea.off("pointerover");
     avatarHitArea.off("pointerout");
+    balanceHitArea.off("pointertap");
+    balanceHitArea.off("pointerover");
     rootContainer.destroy({ children: true });
   }
 
@@ -393,5 +549,16 @@ export async function createPlayerProfileUi(
   const SCALE = isTouchLike ? 0.85 : 0.75;
   rootContainer.scale.set(SCALE);
 
-  return { container: rootContainer, setAvatar, setUsername, setCoins, destroy };
+  return {
+    container: rootContainer,
+    setAvatar,
+    setUsername,
+    setBalances,
+    updateBalanceAmount,
+    getSelectedCurrencyId,
+    getSelectedBalance,
+    onSelectCurrency,
+    closeDropdown,
+    destroy,
+  };
 }

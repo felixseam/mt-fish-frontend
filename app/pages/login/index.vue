@@ -1,69 +1,3 @@
-<template>
-  <div class="login-page">
-    <LanguageSwitcher />
-    <div class="login-page__backdrop" />
-
-    <v-container class="fill-height d-flex align-center justify-center">
-      <v-sheet class="login-shell" rounded="xl" elevation="24">
-        <div class="login-shell__glow" />
-
-        <div class="login-shell__header">
-          <!-- <p class="login-shell__eyebrow">Aqua Area</p> -->
-          <h1 class="login-shell__title">Login</h1>
-          <!-- <p class="login-shell__subtitle">
-            {{ t('login.subtitle') }}
-          </p> -->
-        </div>
-
-        <v-form class="login-form" @submit.prevent="handleLogin">
-          <v-text-field
-            v-model="user_name"
-            :label="t('login.username')"
-            :placeholder="t('login.usernamePlaceholder')"
-            autocomplete="username"
-            variant="outlined"
-            density="comfortable"
-            rounded="lg"
-            prepend-inner-icon="mdi-account-outline"
-            :error-messages="errors.user_name ? [errors.user_name] : []"
-            hide-details="auto"
-            class="login-form__field"
-          />
-
-          <v-text-field
-            v-model="password"
-            :type="showPassword ? 'text' : 'password'"
-            :label="t('login.password')"
-            :placeholder="t('login.passwordPlaceholder')"
-            autocomplete="current-password"
-            variant="outlined"
-            density="comfortable"
-            rounded="lg"
-            prepend-inner-icon="mdi-lock-outline"
-            :append-inner-icon="showPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
-            :error-messages="errors.password ? [errors.password] : []"
-            hide-details="auto"
-            class="login-form__field"
-            @click:append-inner="togglePasswordVisibility"
-          />
-
-          <v-btn
-            type="submit"
-            color="info"
-            size="x-large"
-            rounded="lg"
-            block
-            :loading="isLoggingIn"
-            class="login-form__submit"
-          >
-            {{ t('login.action') }}
-          </v-btn>
-        </v-form>
-      </v-sheet>
-    </v-container>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import LanguageSwitcher from "~/components/LanguageSwitcher.vue";
@@ -173,6 +107,47 @@ async function handleLogin() {
   }
 }
 </script>
+
+
+<template>
+  <div class="login-page">
+    <LanguageSwitcher />
+    <div class="login-page__backdrop" />
+
+    <v-container class="fill-height d-flex align-center justify-center">
+      <v-sheet class="login-shell" rounded="xl" elevation="24">
+        <div class="login-shell__glow" />
+
+        <div class="login-shell__header">
+          <!-- <p class="login-shell__eyebrow">Aqua Area</p> -->
+          <h1 class="login-shell__title">Login</h1>
+          <!-- <p class="login-shell__subtitle">
+            {{ t('login.subtitle') }}
+          </p> -->
+        </div>
+
+        <v-form class="login-form" @submit.prevent="handleLogin">
+          <v-text-field v-model="user_name" :label="t('login.username')" :placeholder="t('login.usernamePlaceholder')"
+            autocomplete="username" variant="outlined" density="comfortable" rounded="lg"
+            prepend-inner-icon="mdi-account-outline" :error-messages="errors.user_name ? [errors.user_name] : []"
+            hide-details="auto" class="login-form__field" />
+
+          <v-text-field v-model="password" :type="showPassword ? 'text' : 'password'" :label="t('login.password')"
+            :placeholder="t('login.passwordPlaceholder')" autocomplete="current-password" variant="outlined"
+            density="comfortable" rounded="lg" prepend-inner-icon="mdi-lock-outline"
+            :append-inner-icon="showPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+            :error-messages="errors.password ? [errors.password] : []" hide-details="auto" class="login-form__field"
+            @click:append-inner="togglePasswordVisibility" />
+
+          <v-btn type="submit" color="info" size="x-large" rounded="lg" block :loading="isLoggingIn"
+            class="login-form__submit">
+            {{ t('login.action') }}
+          </v-btn>
+        </v-form>
+      </v-sheet>
+    </v-container>
+  </div>
+</template>
 
 <style scoped>
 .login-page {

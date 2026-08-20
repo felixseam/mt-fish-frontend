@@ -126,6 +126,7 @@ export function useFishSessionRuntime() {
     fishTypeId: number,
     cannonTypeId: number,
     elapsedSeconds: string,
+    currency_id: number,
   ) {
     if (!session.value) throw new Error("Session not ready");
     return createBet({
@@ -133,6 +134,7 @@ export function useFishSessionRuntime() {
       fish_type_id: fishTypeId,
       cannon_type_id: cannonTypeId,
       elapsed_seconds: elapsedSeconds,
+      currency_id: currency_id,
     });
   }
 
@@ -164,7 +166,7 @@ export function useFishSessionRuntime() {
     startSnapshotLoop,
     stopAndClose,
     fireBet,
-    pauseSnapshotLoop,
-    resumeSnapshotLoop,
+    // pauseSnapshotLoop,
+    // resumeSnapshotLoop,
   };
 }

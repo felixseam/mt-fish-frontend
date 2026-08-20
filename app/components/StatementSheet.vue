@@ -1,11 +1,11 @@
 <template>
-  <v-bottom-sheet v-model="showSheet" fullscreen>
+  <v-dialog v-model="showSheet" fullscreen>
     <v-card height="100vh" class="report-card">
       <v-toolbar class="report-toolbar">
         <v-toolbar-title class="text-bold text-2xl toolbar-title">របាយការណ៍</v-toolbar-title>
         <v-spacer />
         <v-btn icon @click="showSheet = false" class="close-btn">
-          <v-icon>mdi-close</v-icon>
+          <v-icon color="error">mdi-close</v-icon>
         </v-btn>
       </v-toolbar>
 
@@ -17,6 +17,12 @@
               style="max-width: 180px" class="ocean-input" @update:model-value="handleDateChange" />
           </div>
 
+          <!-- <div class="filter-right">
+            <v-btn class="text-capitalize filter-btn filter-btn--today" @click="setQuickDate(0)">Today</v-btn>
+            <v-btn class="text-capitalize filter-btn filter-btn--outline" @click="setQuickDate(1)">Yesterday</v-btn>
+            <v-btn class="text-capitalize filter-btn filter-btn--outline" @click="setQuickDate(7)">Week</v-btn>
+          </div> -->
+
           <div class="filter-right">
             <v-btn color="#00C2D4" class="text-capitalize filter-btn" @click="setQuickDate(0)">Today</v-btn>
             <v-btn color="#FFD54F" class="text-capitalize filter-btn" @click="setQuickDate(1)">Yesterday</v-btn>
@@ -24,22 +30,12 @@
           </div>
         </div>
 
-        <AppTable
-          :columns="columns"
-          :items="reportData"
-          :loading="isLoading"
-          :error="errorMessage"
-          height="calc(100vh - 220px)"
-          :page="currentPage"
-          :page-size="itemsPerPage"
-          :total-pages="totalPages"
-          :subtotals="pageSubtotals"
-          :grand-totals="grandTotalsRow"
-          @update:page="currentPage = $event"
-        />
+        <AppTable :columns="columns" :items="reportData" :loading="isLoading" :error="errorMessage"
+          height="calc(100vh - 210px)" :page="currentPage" :page-size="itemsPerPage" :total-pages="totalPages"
+          :subtotals="pageSubtotals" :grand-totals="grandTotalsRow" @update:page="currentPage = $event" />
       </v-card-text>
     </v-card>
-  </v-bottom-sheet>
+  </v-dialog>
 </template>
 
 <script setup lang="ts">
@@ -282,22 +278,41 @@ defineExpose({ open });
 
 <style scoped>
 .report-card {
-  background: rgb(var(--v-theme-background)) !important;
-  color: rgb(var(--v-theme-on-background)) !important;
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: rgba(7, 19, 31, 0.01) !important;
+  /* was 0.82 → 0.55 → now 0.3 */
+  color: #f4fbff !important;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.report-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255, 221, 115, 0.15), transparent 34%),
+    radial-gradient(circle at 82% 88%, rgba(94, 218, 255, 0.12), transparent 38%);
+}
+
+.report-card>* {
+  position: relative;
+  z-index: 1;
 }
 
 .report-toolbar {
-  background: rgb(var(--v-theme-surface)) !important;
-  border-bottom: 2px solid rgb(var(--v-theme-secondary)) !important;
+  background: rgba(7, 19, 31, 0.01) !important;
+  border-bottom: 2px solid rgba(255, 219, 127, 0.22) !important;
 }
 
 .toolbar-title {
-  color: rgb(var(--v-theme-primary)) !important;
-  font-weight: bold;
-}
+  color: #9fe9f5 !important;
+  font-weight: 900;
 
-.close-btn {
-  color: rgb(var(--v-theme-close-btn)) !important;
 }
 
 .filter-row {
@@ -305,7 +320,7 @@ defineExpose({ open });
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  margin-bottom: 15px;
+  margin-bottom: 10px;
 }
 
 .filter-left {
@@ -321,26 +336,42 @@ defineExpose({ open });
 }
 
 .filter-label {
-  color: rgb(var(--v-theme-primary)) !important;
+  color: #9fe9f5 !important;
+  font-weight: 600;
 }
 
 .filter-btn {
-  border-width: 1.5px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.5px;
-  color: white !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+
+}
+
+.filter-btn--today {
+  background: linear-gradient(180deg, #4de8ff, #17b9d6) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+}
+
+.filter-btn--outline {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: #eafcff !important;
+  border: 1.5px solid rgba(160, 230, 245, 0.55) !important;
+}
+
+.filter-btn--outline:hover {
+  background: rgba(48, 226, 255, 0.14) !important;
 }
 
 .ocean-input :deep(.v-field) {
-  background: rgb(var(--v-theme-surface)) !important;
-  color: rgb(var(--v-theme-on-surface)) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #eef8ff !important;
 }
 
 .ocean-input :deep(.v-field__outline) {
-  color: rgb(var(--v-theme-secondary)) !important;
+  color: rgba(165, 214, 241, 0.28) !important;
 }
 
 .ocean-input :deep(input) {
-  color: rgb(var(--v-theme-on-surface)) !important;
+  color: #eef8ff !important;
 }
 </style>

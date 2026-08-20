@@ -2,7 +2,39 @@
 
 import { useApiInterceptor } from "~/composables/api/useApiInterceptor";
 
-// ── nested types ──────────────────────────────────────────────
+
+export interface ManifestFileConfigEntry {
+  frames?: string[];
+  i?: number | number[];
+  prefix?: string;
+  t?: number;
+  anisoLevel?: number;
+  files?: Array<{
+    ext: string;
+    file: string;
+    format: number;
+  }>;
+  filterMode?: number;
+  mipmap?: boolean;
+  platforms?: Record<string, number>;
+  pma?: boolean;
+  sRGB?: boolean;
+  type?: number;
+  wrapMode?: number;
+  shaderName?: string;
+}
+
+export interface ManifestFileConfig {
+  config: ManifestFileConfigEntry[];
+  files?: Record<string, string[]>;
+}
+
+export interface ManifestAssetManifest {
+  base_path: string;
+  file_config_url: string;
+  file_config: ManifestFileConfig;
+}
+
 
 export interface ManifestGameConfig {
   id: number;
@@ -28,15 +60,6 @@ export interface ManifestPathVersion {
   source_name: string;
 }
 
-export interface ManifestAssetManifest {
-  base_path: string;
-  file_config_url: string;
-  file_config: {
-    files: Record<string, string[]>;
-    config: any[];
-  };
-}
-
 export interface ManifestScene {
   id: string;
   label: string;
@@ -55,15 +78,20 @@ export interface ManifestCannonLevel {
   order: number;
 }
 
+export interface ManifestCannonBetAmount {
+  currency_id: number;
+  currency_code: string;
+  bet_amount: string;
+}
+
 export interface ManifestCannonType {
   id: number;
   cannon_code: string;
   cannon_name: string;
-  bet_amount: string;
   cannon_level_id: number;
+  bet_amounts: ManifestCannonBetAmount[];
   order: number;
 }
-
 export interface ManifestRenderType {
   id: number;
   type_code: string;
@@ -85,8 +113,9 @@ export interface ManifestRenderFamily {
   spine_json_path: string | null;
   spine_atlas_path: string | null;
   spine_png_path: string | null;
+
   render_type: ManifestRenderType | null;
-  render_states: ManifestRenderState[];
+  render_states: ManifestRenderState[] | null;
 }
 
 export interface ManifestFishType {
@@ -117,20 +146,18 @@ export interface ManifestFishType {
   base_skin: string | null;
   render_family: ManifestRenderFamily | null;
 }
-
-// ── root response ─────────────────────────────────────────────
-
 export interface GameManifest {
   game: ManifestGameConfig;
   path_version: ManifestPathVersion;
   asset_manifest: ManifestAssetManifest;
+
   scenes: ManifestScene[];
+
   cannon_levels: ManifestCannonLevel[];
   cannon_types: ManifestCannonType[];
+
   fish_types: ManifestFishType[];
 }
-
-// ── API call ──────────────────────────────────────────────────
 
 export async function getGameManifest() {
   return useApiInterceptor<GameManifest>(
@@ -138,6 +165,8 @@ export async function getGameManifest() {
     {
       method: "GET",
     },
-    { redirectOnError: false },
+    {
+      redirectOnError: false,
+    },
   );
 }

@@ -18,7 +18,6 @@ export interface MyInfoData {
   user_name: string
   avatar: string
   balances: MemberBalanceItem[]
-  coin_amount: string
 }
 
 export interface UpdateAvatarRequest {

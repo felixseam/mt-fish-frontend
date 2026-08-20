@@ -50,7 +50,7 @@ export interface JackpotReward {
   contribution_amount: string
 }
 
-export async function createBet(payload: { session_id: number; fish_type_id: number; cannon_type_id: number; elapsed_seconds: string }) {
+export async function createBet(payload: { session_id: number; fish_type_id: number; cannon_type_id: number; elapsed_seconds: string, currency_id: number }) {
     return useApiInterceptor<CreateBetResponse>(
         "/bets",
         {

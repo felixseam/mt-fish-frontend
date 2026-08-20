@@ -5,7 +5,7 @@
         <v-toolbar-title class="text-bold text-2xl toolbar-title">ប្រតិបត្តិការ</v-toolbar-title>
         <v-spacer />
         <v-btn icon @click="showSheet = false" class="close-btn">
-          <v-icon>mdi-close</v-icon>
+          <v-icon color="error">mdi-close</v-icon>
         </v-btn>
       </v-toolbar>
 
@@ -226,22 +226,39 @@ defineExpose({ open })
 
 <style scoped>
 .report-card {
-  background: rgb(var(--v-theme-background)) !important;
-  color: rgb(var(--v-theme-on-background)) !important;
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: rgba(7, 19, 31, 0.01) !important;
+  color: #f4fbff !important;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.report-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255, 221, 115, 0.15), transparent 34%),
+    radial-gradient(circle at 82% 88%, rgba(94, 218, 255, 0.12), transparent 38%);
+}
+
+.report-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .report-toolbar {
-  background: rgb(var(--v-theme-surface)) !important;
-  border-bottom: 2px solid rgb(var(--v-theme-secondary)) !important;
+  background: rgba(7, 19, 31, 0.01) !important;
+  border-bottom: 2px solid rgba(255, 219, 127, 0.22) !important;
 }
 
 .toolbar-title {
-  color: rgb(var(--v-theme-primary)) !important;
-  font-weight: bold;
-}
-
-.close-btn {
-  color: rgb(var(--v-theme-close-btn)) !important;
+  color: #9fe9f5 !important;
+  font-weight: 900;
 }
 
 .filter-row {
@@ -249,7 +266,7 @@ defineExpose({ open })
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  margin-bottom: 15px;
+  margin-bottom: 10px;
 }
 
 .filter-left {
@@ -265,27 +282,26 @@ defineExpose({ open })
 }
 
 .filter-label {
-  color: rgb(var(--v-theme-primary)) !important;
+  color: #9fe9f5 !important;
+  font-weight: 600;
 }
 
 .filter-btn {
-  border-width: 1.5px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.5px;
-  color: white !important;
+  color: #fff !important;
+  font-weight: 700 !important;
 }
 
 .ocean-input :deep(.v-field) {
-  background: rgb(var(--v-theme-surface)) !important;
-  color: rgb(var(--v-theme-on-surface)) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #eef8ff !important;
 }
 
 .ocean-input :deep(.v-field__outline) {
-  color: rgb(var(--v-theme-secondary)) !important;
+  color: rgba(165, 214, 241, 0.28) !important;
 }
 
 .ocean-input :deep(input),
 .ocean-input :deep(.v-select__selection-text) {
-  color: rgb(var(--v-theme-on-surface)) !important;
+  color: #eef8ff !important;
 }
 </style>

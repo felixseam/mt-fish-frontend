@@ -15,7 +15,7 @@ export interface Notification {
 export type BroadcastResponse = {
   topic: string;
   data: {
-    member_coin?: MemberCoin;
+    member_balance?: MemberBalance;
     user_notifications: Notification[];
   };
 };
@@ -26,10 +26,11 @@ export interface BroadcastState {
   broadcastResponse: BroadcastResponse;
 }
 
-export interface MemberCoin {
+export interface MemberBalance {
   member_id: number;
   member_uuid: string;
-  coin_amount: string;
+  balance: string;
+  currency_id:number;
 }
 
 export function createWebSocketConnection(): Promise<WebSocket> {

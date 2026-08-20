@@ -10,16 +10,12 @@ import { getFishById } from "../fish/useFishApiData";
 import { showBossCatchEffect } from "../reward/boss-kill-reward";
 import { showFishMissRewardEffect } from "../reward/miss-reward";
 import { useGameAudio } from "../audio/useGameAudio";
-
-const BET_STEPS = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000] as const;
+import type {
+  ManifestCannonType,
+  ManifestCannonLevel,
+} from "~/composables/service/gameManifestApi";
 
 type CannonLevel = 1 | 2 | 3;
-
-const getCannonLevel = (bet: number): CannonLevel => {
-  if (bet < 200) return 1;
-  if (bet < 2000) return 2;
-  return 3;
-};
 
 const getCannonFrameName = (level: CannonLevel) => {
   if (level === 1) return "cannon_common01.png";
@@ -38,8 +34,6 @@ const getNetFrameName = (level: CannonLevel) => {
   if (level === 2) return "h01_2.png";
   return "h01.png";
 };
-
-const getBetStep = (index: number) => BET_STEPS[index] ?? BET_STEPS[0];
 
 const BURST_FRAMES = ["ef_bb_01.png", "ef_bb_03.png", "ef_bb_05.png"] as const;
 const CANNON_BARREL_LENGTH_RATIO = 0.72;
@@ -77,6 +71,65 @@ type CannonPerfOptions = {
   disableHitEffects?: boolean;
 };
 
+// ── Currency-aware bet steps ────────────────────────────────────────────────
+// Built from the manifest's `cannon_types[].bet_amounts`, one bet step per
+// cannon type, filtered/ordered for whichever currency is currently active.
+type CannonBetStep = {
+  cannonTypeId: number;
+  cannonLevelId: CannonLevel;
+  betAmount: number;
+  currencyId: number;
+  currencyCode: string;
+  displayAmount: string;
+};
+
+function formatBetAmount(amount: number, currencyCode?: string): string {
+  const code = (currencyCode || "").toUpperCase();
+  if (code === "KHR" || code === "VND") {
+    return Math.round(amount).toLocaleString("en-US");
+  }
+  // Trim trailing zeros but keep at least 2 decimal places for
+  // decimal-denominated currencies (USD, CNY, ...).
+  let fixed = amount.toFixed(3);
+  fixed = fixed.replace(/0+$/, "").replace(/\.$/, "");
+  const [whole, frac = ""] = fixed.split(".");
+  if (frac.length < 2) return `${whole}.${frac.padEnd(2, "0")}`;
+  return `${whole}.${frac}`;
+}
+
+function buildBetSteps(
+  cannonTypes: ManifestCannonType[],
+  currencyId: number,
+): CannonBetStep[] {
+  const sorted = [...cannonTypes].sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0),
+  );
+  const steps: CannonBetStep[] = [];
+
+  for (const cannon of sorted) {
+    const match = cannon.bet_amounts.find(
+      (b) => b.currency_id === currencyId,
+    );
+    if (!match) continue;
+    const amount = parseFloat(match.bet_amount);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+
+    const rawLevel = cannon.cannon_level_id;
+    const level: CannonLevel = rawLevel === 2 ? 2 : rawLevel === 3 ? 3 : 1;
+
+    steps.push({
+      cannonTypeId: cannon.id,
+      cannonLevelId: level,
+      betAmount: amount,
+      currencyId: match.currency_id,
+      currencyCode: match.currency_code,
+      displayAmount: formatBetAmount(amount, match.currency_code),
+    });
+  }
+
+  return steps;
+}
+
 let playfieldWidth = GAME_WIDTH;
 let playfieldHeight = GAME_HEIGHT;
 
@@ -87,9 +140,9 @@ const setPlayfieldSize = (w: number, h: number) => {
 
 export async function createCannonBetUi(options?: {
   getCollisionTargets?: () => BulletCollisionTarget[];
-  getCurrentCoins?: () => number;
-  onCoinsSpent?: (spentCoins: number, remainingCoins: number) => void;
-  onInsufficientBalance?: (requiredCoins: number, currentCoins: number) => void;
+  getCurrentBalance?: () => number;
+  onBalanceSpent?: (spentAmount: number, remainingAmount: number) => void;
+  onInsufficientBalance?: (requiredAmount: number, currentAmount: number) => void;
   isInputBlocked?: () => boolean;
   onFishHitResolved?: (payload: {
     fishTypeId: number;
@@ -103,7 +156,12 @@ export async function createCannonBetUi(options?: {
     isJackpot?: boolean;
     jackpotReward?: number;
   } | null>;
-  resolveCannonTypeId?: (betAmount: number) => number | null;
+  /** Cannon types + per-currency bet amounts from the game manifest. */
+  cannonTypes: ManifestCannonType[];
+  /** Optional — reserved for future use if frame names ever come from the manifest instead of the local table. */
+  cannonLevels?: ManifestCannonLevel[];
+  /** Currency the player is currently betting in (e.g. member.currency_id). */
+  getActiveCurrencyId: () => number;
   getCoinBoxPosition?: () => { x: number; y: number } | undefined;
   getRewardLayer?: () => PIXI.Container | null;
   getShakeTarget?: () => PIXI.Container | null;
@@ -124,6 +182,37 @@ export async function createCannonBetUi(options?: {
   const container = new PIXI.Container();
   container.sortableChildren = true;
 
+  let cannonTypesData: ManifestCannonType[] = options?.cannonTypes ?? [];
+  let activeCurrencyId: number = options?.getActiveCurrencyId?.() ?? 0;
+  let betSteps: CannonBetStep[] = buildBetSteps(
+    cannonTypesData,
+    activeCurrencyId,
+  );
+
+  if (betSteps.length === 0) {
+    console.warn(
+      "[cannonBetUi] no bet steps resolved for currencyId",
+      activeCurrencyId,
+      "— check that the manifest's cannon_types include a bet_amounts entry for this currency.",
+    );
+  }
+
+  const FALLBACK_STEP: CannonBetStep = {
+    cannonTypeId: 0,
+    cannonLevelId: 1,
+    betAmount: 0,
+    currencyId: activeCurrencyId,
+    currencyCode: "",
+    displayAmount: "0",
+  };
+
+  const getBetStepAt = (index: number): CannonBetStep => {
+    if (betSteps.length === 0) return FALLBACK_STEP;
+    return betSteps[index] ?? betSteps[0]!;
+  };
+
+  let currentBetIndex = 0;
+
   // base platform
   const base = new PIXI.Sprite(requireTexture(CANNON_ATLAS_URL, "base.png"));
   base.anchor.set(0.5, 1);
@@ -132,13 +221,12 @@ export async function createCannonBetUi(options?: {
 
   const betButtonsY = -base.height / 2 - 10;
   const betCenterY = -base.height / 2 + 20;
-  let currentBetIndex = 0;
 
   // cannon
   const cannonSprite = new PIXI.Sprite(
     requireTexture(
       CANNON_ATLAS_URL,
-      getCannonFrameName(getCannonLevel(getBetStep(currentBetIndex))),
+      getCannonFrameName(getBetStepAt(currentBetIndex).cannonLevelId),
     ),
   );
   cannonSprite.anchor.set(0.5, 1);
@@ -385,21 +473,21 @@ export async function createCannonBetUi(options?: {
   let bulletUpdateMs = 0;
   let bulletCollisionMs = 0;
   let worstBulletUpdateMs = 0;
-  let reservedCoins = 0;
+  let reservedAmount = 0;
 
   const getSpendableCoins = () => {
     const currentCoins =
-      options?.getCurrentCoins?.() ?? Number.POSITIVE_INFINITY;
-    return Math.max(0, currentCoins - reservedCoins);
+      options?.getCurrentBalance?.() ?? Number.POSITIVE_INFINITY;
+    return Math.max(0, currentCoins - reservedAmount);
   };
 
   const reserveCoinsForShot = (bet: number) => {
-    reservedCoins += bet;
-    options?.onCoinsSpent?.(bet, getSpendableCoins());
+    reservedAmount += bet;
+    options?.onBalanceSpent?.(bet, getSpendableCoins());
   };
 
   const releaseCoinsForShot = (bet: number) => {
-    reservedCoins = Math.max(0, reservedCoins - bet);
+    reservedAmount = Math.max(0, reservedAmount - bet);
   };
 
   const destroyBullet = (inst: BulletInstance) => {
@@ -460,8 +548,16 @@ export async function createCannonBetUi(options?: {
   // Replace all individual tickers in fireBullet with shared ticker
   const fireBullet = (targetX: number, targetY: number) => {
     if (options?.perfOptions?.disableBullets) return;
-    const bet = getBetStep(currentBetIndex);
-    const level = getCannonLevel(bet);
+    // Capture the bet step (amount + cannon type + level) at the moment the
+    // shot is fired. This is intentional: if the player switches currency
+    // or bet tier while this bullet is mid-flight, the shot must still
+    // resolve against what it was fired with, not whatever is selected
+    // by the time it hits.
+    const betStep = getBetStepAt(currentBetIndex);
+    const bet = betStep.betAmount;
+    const level = betStep.cannonLevelId;
+    const cannonTypeId = betStep.cannonTypeId;
+
     const rotation = getAimRotation(targetX, targetY);
     const muzzle = getMuzzlePosition(rotation);
     const startX = muzzle.x - Math.sin(rotation) * BULLET_START_INSET;
@@ -530,10 +626,10 @@ export async function createCannonBetUi(options?: {
 
       const hitTargets: BulletCollisionTarget[] = [];
       for (const target of collisionTargets) {
-        const dx = bulletGlobal.x - target.center.x;
-        const dy = bulletGlobal.y - target.center.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist <= target.radius || dist <= netRadiusPx) {
+        const dx2 = bulletGlobal.x - target.center.x;
+        const dy2 = bulletGlobal.y - target.center.y;
+        const dist2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+        if (dist2 <= target.radius || dist2 <= netRadiusPx) {
           hitTargets.push(target);
         }
       }
@@ -559,22 +655,11 @@ export async function createCannonBetUi(options?: {
         if (sprite.parent) sprite.parent.removeChild(sprite);
         sprite.destroy();
 
-        // console.log("[bullet] HIT detected", {
-        //   bulletGlobal: { x: worldHit.x.toFixed(2), y: worldHit.y.toFixed(2) },
-        //   layerPos: { x: layerPos.x.toFixed(2), y: layerPos.y.toFixed(2) },
-        //   hitCount: hitTargets.length,
-        //   fishs: hitTargets.map((t) => ({
-        //     hasFishData: !!t.fishData,
-        //     fishData: t.fishData,
-        //   })),
-        // });
-
         // reward + backend bet using first hit target with fish id
         for (const target of hitTargets) {
           const fish = target.fishData;
           const fishTypeId = fish?.id ?? null;
           if (!fishTypeId) continue;
-          const cannonTypeId = options?.resolveCannonTypeId?.(bet) ?? null;
           if (!cannonTypeId) continue;
           betRequestStarted = true;
 
@@ -711,7 +796,7 @@ export async function createCannonBetUi(options?: {
   betBg.position.set(0, betCenterY);
   betBg.zIndex = 6;
 
-  const betValue = new PIXI.Text("10", {
+  const betValue = new PIXI.Text("0", {
     fill: 0xffffff,
     fontFamily: "monospace",
     fontSize: 18,
@@ -729,12 +814,11 @@ export async function createCannonBetUi(options?: {
   betPlus.zIndex = 6;
 
   const updateBetUi = (animate = false) => {
-    const currentBet = getBetStep(currentBetIndex);
-    const currentLevel = getCannonLevel(currentBet);
-    betValue.text = String(currentBet);
+    const step = getBetStepAt(currentBetIndex);
+    betValue.text = step.displayAmount;
     cannonSprite.texture = requireTexture(
       CANNON_ATLAS_URL,
-      getCannonFrameName(currentLevel),
+      getCannonFrameName(step.cannonLevelId),
     );
     if (animate) playBurstEffect();
   };
@@ -743,8 +827,8 @@ export async function createCannonBetUi(options?: {
   betMinus.cursor = "pointer";
   betMinus.on("pointertap", (e: PIXI.FederatedPointerEvent) => {
     e.stopPropagation();
-    currentBetIndex =
-      (currentBetIndex - 1 + BET_STEPS.length) % BET_STEPS.length;
+    if (betSteps.length === 0) return;
+    currentBetIndex = (currentBetIndex - 1 + betSteps.length) % betSteps.length;
     updateBetUi(true);
     gameAudio.playSoundEffect("uiClick");
   });
@@ -753,7 +837,8 @@ export async function createCannonBetUi(options?: {
   betPlus.cursor = "pointer";
   betPlus.on("pointertap", (e: PIXI.FederatedPointerEvent) => {
     e.stopPropagation();
-    currentBetIndex = (currentBetIndex + 1) % BET_STEPS.length;
+    if (betSteps.length === 0) return;
+    currentBetIndex = (currentBetIndex + 1) % betSteps.length;
     updateBetUi(true);
     gameAudio.playSoundEffect("uiClick");
   });
@@ -775,17 +860,18 @@ export async function createCannonBetUi(options?: {
     if (options?.isInputBlocked?.()) {
       return;
     }
+    if (betSteps.length === 0) return;
     // don't fire if tapping bet buttons
     const local = container.toLocal(e.global);
-    const currentBet = getBetStep(currentBetIndex);
-    const currentCoins = options?.getCurrentCoins?.() ?? Number.POSITIVE_INFINITY;
-    const spendableCoins = Math.max(0, currentCoins - reservedCoins);
+    const currentBet = getBetStepAt(currentBetIndex).betAmount;
+    const currentBalance = options?.getCurrentBalance?.() ?? Number.POSITIVE_INFINITY;
+    const spendableCoins = Math.max(0, currentBalance - reservedAmount);
 
     // Only show the dialog when the actual wallet balance is below the bet.
     // Reserved coins can still block a shot, but we keep that as a silent guard
     // so the top-up dialog reflects the visible balance the player sees.
-    if (currentCoins < currentBet) {
-      options?.onInsufficientBalance?.(currentBet, currentCoins);
+    if (currentBalance < currentBet) {
+      options?.onInsufficientBalance?.(currentBet, currentBalance);
       return;
     }
 
@@ -842,7 +928,47 @@ export async function createCannonBetUi(options?: {
     return stats;
   };
 
-  return { container, destroy, setPlayfieldSize, getPerfStats };
+  /**
+   * Rebuild the bet-step ladder for a new active currency (called when the
+   * player switches wallets in the profile dropdown). Tries to preserve the
+   * player's relative position in the ladder (e.g. "3rd tier") rather than
+   * always resetting to the smallest bet.
+   */
+  const setCurrency = (currencyId: number) => {
+    activeCurrencyId = currencyId;
+    const previousIndex = currentBetIndex;
+    betSteps = buildBetSteps(cannonTypesData, activeCurrencyId);
+    if (betSteps.length === 0) {
+      console.warn(
+        "[cannonBetUi] no bet steps resolved for currencyId",
+        activeCurrencyId,
+      );
+      currentBetIndex = 0;
+      return;
+    }
+    currentBetIndex = Math.min(previousIndex, betSteps.length - 1);
+    updateBetUi(false);
+  };
+
+  /** Replace the cannon-type/bet-amount table wholesale, e.g. after a manifest refresh. */
+  const setCannonTypes = (cannonTypes: ManifestCannonType[]) => {
+    cannonTypesData = cannonTypes;
+    setCurrency(activeCurrencyId);
+  };
+
+  const getCurrentBetAmount = () => getBetStepAt(currentBetIndex).betAmount;
+  const getCurrentCannonTypeId = () => getBetStepAt(currentBetIndex).cannonTypeId;
+
+  return {
+    container,
+    destroy,
+    setPlayfieldSize,
+    getPerfStats,
+    setCurrency,
+    setCannonTypes,
+    getCurrentBetAmount,
+    getCurrentCannonTypeId,
+  };
 }
 
 //── Kill animation ─────────────────────────────────────────────────────────

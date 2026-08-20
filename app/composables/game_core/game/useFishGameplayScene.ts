@@ -23,6 +23,11 @@ import { createMenuUi } from "./createMenuUi";
 import { useMemberStore } from "~/stores/memberStore";
 import { useFishSessionRuntime } from "./useFishSessionRuntime";
 import { useGameAudio } from "~/composables/game_core/audio/useGameAudio";
+import {
+  getGameManifest,
+  type GameManifest,
+  type ManifestCannonType,
+} from "~/composables/service/gameManifestApi";
 
 type SceneDef = {
   id: string;
@@ -55,6 +60,12 @@ type FishPerfDebugOptions = FishContextPerfOptions & {
   disableBullets?: boolean;
   disableRewards?: boolean;
   disableHitEffects?: boolean;
+};
+
+type PlayerBalance = {
+  currencyId: number;
+  code: string;
+  amount: number;
 };
 
 const GAME_WIDTH = 1280;
@@ -187,6 +198,7 @@ const scenes: SceneDef[] = [
 export function useFishGameplayScene() {
   const sessionRuntime = useFishSessionRuntime();
   const memberStore = useMemberStore();
+  const gameManifestStore = useGameManifestStore();
   const gameAudio = useGameAudio();
   const currentSceneId = ref(scenes[0]?.id ?? "bg1");
   const transitionMode = ref<MapTransitionMode>("normal");
@@ -268,7 +280,14 @@ export function useFishGameplayScene() {
   let rendererResizeCount = 0;
 
   let avatarClickHandler: (() => void) | null = null;
-  let currentCoins = 0;
+
+  // ── Multi-currency balance state ─────────────────────────────────────────
+  // Replaces the old single `currentCoins` figure. Populated from
+  // memberInfo.balances on mount and kept in sync via the watcher below.
+  let currentBalances: PlayerBalance[] = [];
+  // ── Game manifest (cannon types / bet amounts per currency, etc.) ───────
+  let gameManifest: GameManifest | null = null;
+
   let menuHandlers: {
     onMute?: () => void;
     onInfo?: () => void;
@@ -280,18 +299,6 @@ export function useFishGameplayScene() {
   } = {};
   let sessionSyncLost = false;
   const perfDebugOptions = getFishPerfDebugOptions();
-  const CANNON_TYPE_BY_BET_AMOUNT: Record<number, number> = {
-    10: 1,
-    20: 2,
-    50: 3,
-    100: 4,
-    200: 5,
-    500: 6,
-    1000: 7,
-    2000: 8,
-    5000: 9,
-    10000: 10,
-  };
 
   function getElapsedSecondsString() {
     if (!mountedAtMs) return "0";
@@ -534,12 +541,12 @@ export function useFishGameplayScene() {
         onHit: () => flashFishHit(child),
         fishData: fishData
           ? {
-              kill_rate_modifier: fishData.kill_rate_modifier,
-              id: fishData.id,
-              min_reward_odd: fishData.min_odd,
-              max_reward_odd: fishData.max_odd,
-              fish_type_name: fishData.fish_type_name,
-            }
+            kill_rate_modifier: fishData.kill_rate_modifier,
+            id: fishData.id,
+            min_reward_odd: fishData.min_odd,
+            max_reward_odd: fishData.max_odd,
+            fish_type_name: fishData.fish_type_name,
+          }
           : null,
       });
     }
@@ -901,51 +908,51 @@ export function useFishGameplayScene() {
     }
   }
 
-  function resumeGame() {
-    if (!pixiApp || !isGamePausedByFocus) return;
-    if (pauseReloadTimer) {
-      clearTimeout(pauseReloadTimer);
-      pauseReloadTimer = null;
-    }
-    isGamePausedByFocus = false;
-    contextMachine?.setPaused(false);
-    pixiApp.ticker.start();
-    gameAudio.resumeFromBackground();
+  // function resumeGame() {
+  //   if (!pixiApp || !isGamePausedByFocus) return;
+  //   if (pauseReloadTimer) {
+  //     clearTimeout(pauseReloadTimer);
+  //     pauseReloadTimer = null;
+  //   }
+  //   isGamePausedByFocus = false;
+  //   contextMachine?.setPaused(false);
+  //   pixiApp.ticker.start();
+  //   gameAudio.resumeFromBackground();
 
-    sessionRuntime.resumeSnapshotLoop(
-      () => ({
-        total_elapsed_seconds: getElapsedSecondsString(),
-        current_context_index:
-          contextMachine?.getRuntimeState().current_context_index ?? null,
-        current_group_id:
-          contextMachine?.getRuntimeState().current_group_id ?? null,
-        current_scene_id:
-          contextMachine?.getRuntimeState().current_scene_id ??
-          currentSceneId.value,
-        boss_scene_active:
-          contextMachine?.getRuntimeState().boss_scene_active ?? false,
-        boss_scene_lock_id:
-          contextMachine?.getRuntimeState().boss_scene_lock_id ?? "",
-        spawn_cursor: contextMachine?.getRuntimeState().spawn_cursor ?? 0,
-        runtime_state_json: contextMachine?.getRuntimeState() ?? {},
-        device_meta_json: {},
-      }),
-      {
-        maxFailuresBeforeSyncLost: 3,
-        onSyncLost: () => {
-          sessionSyncLost = true;
-          onSessionSyncLostHandler?.();
-        },
-      },
-    );
+  //   // sessionRuntime.resumeSnapshotLoop(
+  //   //   () => ({
+  //   //     total_elapsed_seconds: getElapsedSecondsString(),
+  //   //     current_context_index:
+  //   //       contextMachine?.getRuntimeState().current_context_index ?? null,
+  //   //     current_group_id:
+  //   //       contextMachine?.getRuntimeState().current_group_id ?? null,
+  //   //     current_scene_id:
+  //   //       contextMachine?.getRuntimeState().current_scene_id ??
+  //   //       currentSceneId.value,
+  //   //     boss_scene_active:
+  //   //       contextMachine?.getRuntimeState().boss_scene_active ?? false,
+  //   //     boss_scene_lock_id:
+  //   //       contextMachine?.getRuntimeState().boss_scene_lock_id ?? "",
+  //   //     spawn_cursor: contextMachine?.getRuntimeState().spawn_cursor ?? 0,
+  //   //     runtime_state_json: contextMachine?.getRuntimeState() ?? {},
+  //   //     device_meta_json: {},
+  //   //   }),
+  //   //   {
+  //   //     maxFailuresBeforeSyncLost: 3,
+  //   //     onSyncLost: () => {
+  //   //       sessionSyncLost = true;
+  //   //       onSessionSyncLostHandler?.();
+  //   //     },
+  //   //   },
+  //   // );
 
-    if (pendingWhilePaused.length > 0) {
-      const pending = pendingWhilePaused.splice(0);
-      setTimeout(() => {
-        for (const flush of pending) flush();
-      }, 50);
-    }
-  }
+  //   if (pendingWhilePaused.length > 0) {
+  //     const pending = pendingWhilePaused.splice(0);
+  //     setTimeout(() => {
+  //       for (const flush of pending) flush();
+  //     }, 50);
+  //   }
+  // }
 
   function renderScene(
     index: number,
@@ -1068,26 +1075,41 @@ export function useFishGameplayScene() {
       onLogout: options?.onLogout,
     };
 
-    function setGamePaused(paused: boolean) {
-      if (!pixiApp) return;
-      if (paused) {
-        if (isGamePausedByFocus) return;
-        isGamePausedByFocus = true;
-        contextMachine?.setPaused(true);
-        pixiApp.ticker.stop();
-        sessionRuntime.pauseSnapshotLoop();
-        gameAudio.pauseForBackground();
-        pauseReloadTimer = setTimeout(() => {
-          pauseReloadTimer = null;
-          options?.onPauseTooLong?.();
-        }, PAUSE_RELOAD_THRESHOLD_MS);
-        return;
-      }
-    }
+    // function setGamePaused(paused: boolean) {
+    //   if (!pixiApp) return;
+    //   if (paused) {
+    //     if (isGamePausedByFocus) return;
+    //     isGamePausedByFocus = true;
+    //     contextMachine?.setPaused(true);
+    //     pixiApp.ticker.stop();
+    //     // sessionRuntime.pauseSnapshotLoop();
+    //     gameAudio.pauseForBackground();
+    //     pauseReloadTimer = setTimeout(() => {
+    //       pauseReloadTimer = null;
+    //       options?.onPauseTooLong?.();
+    //     }, PAUSE_RELOAD_THRESHOLD_MS);
+    //     return;
+    //   }
+    // }
 
     await memberStore.fetchMyInfo();
     const memberInfo = memberStore.info;
-    currentCoins = parseFloat(memberInfo.coin_amount ?? "0");
+
+    // ── Populate multi-currency balances ────────────────────────────────
+    currentBalances = (memberInfo.balances ?? []).map((b) => ({
+      currencyId: b.currency_id,
+      code: b.currency_code,
+      amount: parseFloat(b.balance_amount ?? "0"),
+    }));
+    if (memberStore.selectedCurrencyID == null) {
+      memberStore.selectedCurrencyID = currentBalances[0]?.currencyId ?? 0
+    }
+    // ── Fetch the game manifest (cannon types / bet amounts / fish, etc.) ─
+    await gameManifestStore.fetchManifest();
+    gameManifest = gameManifestStore.manifest;
+    if (!gameManifest) {
+      console.warn("[fish-scene] game manifest failed to load — cannon bet ladder will be empty");
+    }
     mountedAtMs = Date.now();
     sessionSyncLost = false;
     const boot = await sessionRuntime.openSession(1);
@@ -1147,26 +1169,31 @@ export function useFishGameplayScene() {
     drawDebugRect();
 
     renderScene(currentSceneIndex.value, true);
+
     cannonBetUi = await createCannonBetUi({
       getCollisionTargets: getCachedCollisionTargets,
       isInputBlocked: () =>
         sessionSyncLost || Boolean(options?.isInputBlocked?.()),
-      getCurrentCoins: () => Number(memberStore.info.coin_amount ?? "0") || 0,
-      onCoinsSpent: (_spentCoins, remainingCoins) => { },
-      onInsufficientBalance: (requiredCoins, availableCoins) => {
+      getCurrentBalance: () =>
+        currentBalances.find((b) => b.currencyId === memberStore.selectedCurrencyID,)
+          ?.amount ?? 0,
+      onBalanceSpent: (_spentAmount, _remainingAmount) => { },
+      onInsufficientBalance: (requiredAmount, availableAmount) => {
         options?.onInsufficientBalance?.({
-          requiredCoins,
-          currentCoins: availableCoins,
+          requiredCoins: requiredAmount,
+          currentCoins: availableAmount,
         });
       },
-      resolveCannonTypeId: (betAmount) =>
-        CANNON_TYPE_BY_BET_AMOUNT[betAmount] ?? null,
+      cannonTypes: gameManifest?.cannon_types ?? [],
+      cannonLevels: gameManifest?.cannon_levels ?? [],
+      getActiveCurrencyId: () => memberStore.selectedCurrencyID,
       onFishHitResolved: async ({ fishTypeId, cannonTypeId, target }) => {
         try {
           const betResp = await sessionRuntime.fireBet(
             fishTypeId,
             cannonTypeId,
             getElapsedSecondsString(),
+            memberStore.selectedCurrencyID
           );
           const response = betResp?.data.value.data.bet;
           const isKill = response?.result.is_kill;
@@ -1185,9 +1212,9 @@ export function useFishGameplayScene() {
             isKill,
             isReward,
             isJackpot,
-            killReward: Math.max(0, Math.round(Number(killReward ?? 0))),
-            reward: Math.max(0, Math.round(Number(reward ?? 0))),
-            jackpotReward: Math.max(0, Math.round(Number(jackpotReward ?? 0))),
+            killReward: Math.max(0, Number(killReward ?? 0)),
+            reward: Math.max(0, Number(reward ?? 0)),
+            jackpotReward: Math.max(0, Number(jackpotReward ?? 0)),
           };
 
           if (isGamePausedByFocus) {
@@ -1216,13 +1243,28 @@ export function useFishGameplayScene() {
       memberInfo.user_name || "Player",
       () => avatarClickHandler?.(),
       {
-        initialCoins: parseFloat(memberInfo.coin_amount ?? "0"),
+        initialBalances: currentBalances,
+        initialCurrencyId: memberStore.selectedCurrencyID,
         getAtlasTexture,
       },
     );
     uiLayer.addChild(playerProfileUi.container);
     layoutProfileUi();
     updateCoinBoxPosition();
+
+    playerProfileUi.onSelectCurrency((currencyId) => {
+      memberStore.selectedCurrencyID = currencyId
+    });
+
+    watch(
+      () => memberStore.selectedCurrencyID,
+      (currencyId) => {
+        if (currencyId == null) return;
+        cannonBetUi?.setCurrency(currencyId);
+        playerProfileUi?.setBalances(currentBalances, currencyId);
+        updateCoinBoxPosition();
+      },
+    );
 
     fishInfoDialog = await createFishInfoDialog();
     uiLayer.addChild(fishInfoDialog.container);
@@ -1318,31 +1360,31 @@ export function useFishGameplayScene() {
     });
     resizeObserver.observe(container);
 
-    visibilityHandler = () => {
-      if (document.hidden) {
-        setGamePaused(true);
-      } else {
-        setGamePaused(false);
-      }
-    };
+    // visibilityHandler = () => {
+    //   if (document.hidden) {
+    //     setGamePaused(true);
+    //   } else {
+    //     setGamePaused(false);
+    //   }
+    // };
 
-    windowBlurHandler = () => {
-      setGamePaused(true);
-    };
+    // windowBlurHandler = () => {
+    //   setGamePaused(true);
+    // };
 
-    windowFocusHandler = () => {
-      if (!document.hidden) {
-        setGamePaused(false);
-      }
-    };
+    // windowFocusHandler = () => {
+    //   if (!document.hidden) {
+    //     setGamePaused(false);
+    //   }
+    // };
 
-    document.addEventListener("visibilitychange", visibilityHandler);
-    window.addEventListener("blur", windowBlurHandler);
-    window.addEventListener("focus", windowFocusHandler);
+    // document.addEventListener("visibilitychange", visibilityHandler);
+    // window.addEventListener("blur", windowBlurHandler);
+    // window.addEventListener("focus", windowFocusHandler);
 
-    if (document.hidden) {
-      setGamePaused(true);
-    }
+    // if (document.hidden) {
+    //   setGamePaused(true);
+    // }
   }
 
   function destroy() {
@@ -1418,6 +1460,8 @@ export function useFishGameplayScene() {
     isTransitionRunning = false;
     activeTransitionPromise = null;
     isResizing = false;
+    gameManifest = null;
+    currentBalances = [];
 
     if (pixiApp) {
       pixiApp.destroy(true, { children: true, texture: false });
@@ -1425,15 +1469,27 @@ export function useFishGameplayScene() {
     }
   }
 
+  // ── Keep local balance state + UI in sync with the member store ─────────
+  // ── Balances watcher: stop touching the removed activeCurrencyId,
+  //    fall back to the store instead ────────────────────────────────────
   watch(
-    () => memberStore.info.coin_amount,
-    (coinAmount) => {
-      currentCoins = Math.max(0, Number(coinAmount ?? "0") || 0);
-      playerProfileUi?.setCoins(currentCoins);
+    () => memberStore.info.balances,
+    (balances) => {
+      currentBalances = (balances ?? []).map((b) => ({
+        currencyId: b.currency_id,
+        code: b.currency_code,
+        amount: Math.max(0, Number(b.balance_amount ?? "0") || 0),
+      }));
+      if (memberStore.selectedCurrencyID == null) {
+        memberStore.selectedCurrencyID = currentBalances[0]?.currencyId ?? 0;
+      }
+      playerProfileUi?.setBalances(
+        currentBalances,
+        memberStore.selectedCurrencyID ?? undefined,
+      );
     },
-    { immediate: true },
+    { deep: true, immediate: true },
   );
-
   return {
     scenes,
     currentSceneId,
@@ -1443,8 +1499,18 @@ export function useFishGameplayScene() {
     switchSceneById,
     setPlayerAvatar: (path: string) => playerProfileUi?.setAvatar(path),
     setPlayerUsername: (name: string) => playerProfileUi?.setUsername(name),
-    setPlayerCoins: (_amount: number) => { },
+    setPlayerBalances: (
+      balances: PlayerBalance[],
+      activeId?: number,
+    ) => {
+      currentBalances = balances;
+      if (activeId != null) memberStore.selectedCurrencyID = activeId;
+      playerProfileUi?.setBalances(
+        currentBalances,
+        memberStore.selectedCurrencyID ?? undefined,
+      );
+    },
     isSessionSyncLost: () => sessionSyncLost,
-    resumeGame,
+    // resumeGame,
   };
 }

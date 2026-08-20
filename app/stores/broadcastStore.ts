@@ -32,9 +32,9 @@ export const useBroadcastStore = defineStore("broadcast", {
             const parsedData: BroadcastResponse = JSON.parse(event.data);
 
             switch (parsedData.topic) {
-              case "front.coin.updated":
-                if (parsedData.data.member_coin){
-                  this.memberStore.setCoins(parsedData.data.member_coin?.coin_amount)
+              case "balance_update":
+                if (parsedData.data.member_balance){
+                  this.memberStore.setBalance(parsedData.data.member_balance.balance, parsedData.data.member_balance.currency_id)
                 }
                 // this.memberStore.setCoins("99999999")
               break;

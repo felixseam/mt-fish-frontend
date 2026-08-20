@@ -147,6 +147,8 @@ async function runPreload() {
 
     isPreloading.value = false;
     readyToEnter.value = true;
+
+    console.log("manifestStore=============================", manifestStore.cannonTypes)
   } catch (error) {
     clearProgressTimer();
     preloadError.value =

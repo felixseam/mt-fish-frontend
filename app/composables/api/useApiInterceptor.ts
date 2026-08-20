@@ -38,17 +38,16 @@ export async function useApiInterceptor<T>(
     const status = error.response?.status;
     const errorData = error.response?._data;
 
-    if (status === 401) {
-      console.warn("Unauthorized access detected. Handling 401 error.");
+    if (status === 401 || status === 422) {
+      console.warn(`${status} error detected. Redirecting to login.`);
       authenticated.value = false;
       clearAccessToken();
 
       await navigateTo("/login");
 
-
       if (opts?.redirectOnError === false) {
         throw {
-          status: 401,
+          status,
           message: errorData?.message ?? "Unauthorized",
           raw: errorData,
         };

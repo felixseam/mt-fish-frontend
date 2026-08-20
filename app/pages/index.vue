@@ -12,8 +12,8 @@
   <Notificationdialog v-model="isNotificationDialogOpen" :notifications="notifications" @mark-read="handleMarkRead"
     @mark-all-read="handleMarkAllRead" @delete="handleDeleteNotification" @clear-all="handleClearAllNotifications" />
 
-  <Insufficientbalancedialog v-model="isInsufficientBalanceDialogOpen" :current-balance="currentCoins"
-    @purchase-confirmed="handleCoinPurchase" />
+  <!-- <Insufficientbalancedialog v-model="isInsufficientBalanceDialogOpen" :current-balance="currentCoins"
+    @purchase-confirmed="handleCoinPurchase" /> -->
 
   <GameSettingsDialog v-model="isGameSettingsDialogOpen" />
   <StatementSheet ref="statementSheetRef" />
@@ -63,12 +63,13 @@ const transactionSheetRef = ref<{ open: () => Promise<void> | void } | null>(nul
 const memberStore = useMemberStore()
 const authStore = useAuthStore()
 const experienceStore = useExperienceStore()
-const { mount, destroy, setPlayerAvatar, resumeGame } = useFishGameplayScene()
+// const { mount, destroy, setPlayerAvatar, resumeGame } = useFishGameplayScene()
+const { mount, destroy, setPlayerAvatar } = useFishGameplayScene()
 const notificationsPerPage = 10
 const hasEnteredExperience = computed(() => experienceStore.entered)
 let hasBootstrappedExperience = false
 
-const currentCoins = computed(() => Number(memberStore.info.coin_amount ?? '0') || 0)
+// const currentCoins = computed(() => Number(memberStore.info.coin_amount ?? '0') || 0)
 const hasMoreNotifications = computed(() => notifications.value.length < notificationTotal.value)
 
 function formatNotificationTime(createdAt: string): string {
