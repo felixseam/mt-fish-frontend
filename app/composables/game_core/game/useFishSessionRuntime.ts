@@ -29,10 +29,81 @@ export function useFishSessionRuntime() {
   let snapshotBusy = false;
   let snapshotConsecutiveFailures = 0;
   let syncLost = false;
+  let rotating = false;
+
+  async function rotateSession(
+    pathVersionId: number,
+    getPayload: SnapshotProducer,
+  ) {
+    if (rotating) {
+      throw new Error("Session rotation already in progress");
+    }
+
+    rotating = true;
+
+    pauseSnapshotLoop();
+
+    try {
+      // ------------------------------------------------
+      // 1. Save final state of old session
+      // ------------------------------------------------
+
+      if (session.value) {
+        await pushSnapshot(getPayload);
+      }
+
+      // ------------------------------------------------
+      // 2. End old session
+      // ------------------------------------------------
+
+      if (session.value) {
+        const oldSessionId = session.value.id;
+
+        const payload = getPayload();
+
+        await endGameSession(oldSessionId, {
+          total_elapsed_seconds: payload.total_elapsed_seconds,
+          current_scene_id: payload.current_scene_id ?? "",
+          runtime_state_json: payload.runtime_state_json ?? {},
+          device_meta_json: payload.device_meta_json ?? {},
+        });
+      }
+
+      session.value = null;
+      snapshotVersion.value = 0;
+
+      // ------------------------------------------------
+      // 3. Create new session
+      // ------------------------------------------------
+
+      const result = await enterGameSession({
+        force_new: true,
+        current_path_version_id: pathVersionId,
+        runtime_state_json: {},
+        device_meta_json: {},
+        expires_in_seconds: 43200,
+      });
+
+      const response =
+        (result?.data.value as any)?.data ?? result?.data.value;
+
+      session.value = response.session;
+
+      snapshotVersion.value =
+        response.session.snapshot_version;
+
+      snapshotConsecutiveFailures = 0;
+      syncLost = false;
+
+      return response.session;
+    } finally {
+      rotating = false;
+    }
+  }
 
   async function openSession(pathVersionId: number) {
     const result = await enterGameSession({
-      force_new: false,
+      force_new: true,
       current_path_version_id: pathVersionId,
       runtime_state_json: {},
       device_meta_json: {},
@@ -138,6 +209,9 @@ export function useFishSessionRuntime() {
     });
   }
 
+  // Pausing just stops the interval — it does NOT touch `session.value`,
+  // so nothing needs to be re-fetched or re-opened when resuming. This is
+  // what lets the player come back from background without a page refresh.
   function pauseSnapshotLoop() {
     if (timer) {
       clearInterval(timer);
@@ -158,15 +232,22 @@ export function useFishSessionRuntime() {
   return {
     session,
     snapshotVersion,
+
     get isSyncLost() {
       return syncLost;
     },
+
+    get isRotating() {
+      return rotating;
+    },
+
     openSession,
     pushSnapshot,
     startSnapshotLoop,
     stopAndClose,
+    rotateSession,
     fireBet,
-    // pauseSnapshotLoop,
-    // resumeSnapshotLoop,
+    pauseSnapshotLoop,
+    resumeSnapshotLoop,
   };
 }

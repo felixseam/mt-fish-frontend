@@ -1,132 +1,113 @@
-<!-- components/dialogs/NotificationDialog.vue -->
 <template>
-  <v-dialog
+  <OceanCardDialogShell
     v-model="dialogVisible"
+    :title="t('notifications.title')"
+    icon="mdi-bell-outline"
+    icon-color="#44d7c5"
     max-width="440"
-    :scrim="true"
     scrim-color="rgba(0,0,0,0.65)"
-    transition="dialog-bottom-transition"
-    :fullscreen="$vuetify.display.xs"
-    @click:outside="close"
+    card-class="notif-card"
   >
-    <v-card class="ocean-card" rounded="xl">
+    <template #header-extra>
+      <v-btn
+        v-if="displayUnreadCount > 0"
+        variant="text"
+        size="x-small"
+        class="mark-all-btn mr-1"
+        @click="markAllRead"
+      >
+        {{ t('notifications.markAllRead') }}
+      </v-btn>
+    </template>
 
-      <!-- Header -->
-      <v-card-title class="ocean-header d-flex align-center gap-3 pa-4">
-        <div class="header-icon">
-          <v-icon color="#44d7c5" size="20">mdi-bell-outline</v-icon>
-        </div>
-        <span class="text-subtitle-1 font-weight-medium text-white">{{ t('notifications.title') }}</span>
-        <v-spacer />
-        <v-btn
-          v-if="displayUnreadCount > 0"
-          variant="text"
-          size="x-small"
-          class="mark-all-btn mr-1"
-          @click="markAllRead"
-        >
-          {{ t('notifications.markAllRead') }}
-        </v-btn>
-        <v-btn icon variant="text" size="small" @click="close">
-          <v-icon color="rgba(173,228,242,0.5)" size="18">mdi-close</v-icon>
-        </v-btn>
-      </v-card-title>
+    <!-- Filter tabs -->
+    <div class="filter-tabs px-4 pt-3 pb-1">
+      <button
+        v-for="tab in tabs"
+        :key="tab.key"
+        class="filter-tab"
+        :class="{ 'filter-tab-active': activeTab === tab.key }"
+        @click="activeTab = tab.key"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
 
-      <v-divider color="rgba(58,168,232,0.15)" />
-
-      <!-- Filter tabs -->
-      <div class="filter-tabs px-4 pt-3 pb-1">
-        <button
-          v-for="tab in tabs"
-          :key="tab.key"
-          class="filter-tab"
-          :class="{ 'filter-tab-active': activeTab === tab.key }"
-          @click="activeTab = tab.key"
-        >
-          {{ tab.label }}
-          <!-- <span v-if="tab.count > 0" class="tab-badge">{{ tab.count }}</span> -->
-        </button>
+    <!-- Notification list -->
+    <v-card-text
+      ref="scrollContainerRef"
+      class="pa-0 notif-scroll"
+      @scroll.passive="handleScroll"
+    >
+      <div v-if="isLoading && filteredNotifications.length === 0" class="empty-state">
+        <v-progress-circular indeterminate color="#44d7c5" size="28" width="3" />
+        <p class="empty-text mt-3">{{ t('common.loading') }}</p>
       </div>
 
-      <!-- Notification list -->
-      <v-card-text
-        ref="scrollContainerRef"
-        class="pa-0 notif-scroll"
-        @scroll.passive="handleScroll"
-      >
-        <div v-if="isLoading && filteredNotifications.length === 0" class="empty-state">
-          <v-progress-circular indeterminate color="#44d7c5" size="28" width="3" />
-          <p class="empty-text mt-3">{{ t('common.loading') }}</p>
-        </div>
+      <div v-else-if="filteredNotifications.length === 0" class="empty-state">
+        <v-icon size="38" color="rgba(173,228,242,0.25)">mdi-bell-off-outline</v-icon>
+        <p class="empty-text mt-3">{{ t('notifications.empty') }}</p>
+      </div>
 
-        <div v-else-if="filteredNotifications.length === 0" class="empty-state">
-          <v-icon size="38" color="rgba(173,228,242,0.25)">mdi-bell-off-outline</v-icon>
-          <p class="empty-text mt-3">{{ t('notifications.empty') }}</p>
-        </div>
-
-        <transition-group name="notif-list" tag="div">
-          <div
-            v-for="notif in filteredNotifications"
-            :key="notif.id"
-            class="notif-item"
-            :class="{ 'notif-unread': !notif.read }"
-            @click="markRead(notif.id)"
-          >
-            <!-- Unread dot -->
-            <div class="unread-dot" v-if="!notif.read" />
-
-            <!-- Icon -->
-            <div class="notif-icon-wrap" :class="`notif-icon-${notif.type}`">
-              <v-icon size="18" :color="typeColor(notif.type)">{{ typeIcon(notif.type) }}</v-icon>
-            </div>
-
-            <!-- Content -->
-            <div class="notif-body">
-              <div class="notif-title">{{ notif.title }}</div>
-              <div class="notif-message">{{ notif.message }}</div>
-              <div class="notif-time">{{ notif.time }}</div>
-            </div>
-
-            <!-- Delete -->
-            <v-btn
-              icon
-              variant="text"
-              size="x-small"
-              class="notif-delete"
-              @click.stop="deleteNotif(notif.id)"
-            >
-              <v-icon size="14" color="rgba(173,228,242,0.35)">mdi-close</v-icon>
-            </v-btn>
-          </div>
-        </transition-group>
-
-        <div v-if="isLoading && filteredNotifications.length > 0" class="load-more-state">
-          <v-progress-circular indeterminate color="#44d7c5" size="20" width="3" />
-        </div>
-      </v-card-text>
-
-      <!-- Footer -->
-      <v-divider color="rgba(58,168,232,0.1)" />
-      <v-card-actions class="px-4 py-3 d-flex justify-space-between">
-        <span class="footer-count">{{ t('notifications.totalUnread', { total: totalCount, unread: displayUnreadCount }) }}</span>
-        <v-btn
-          variant="text"
-          size="small"
-          class="clear-btn"
-          :disabled="notifications.length === 0"
-          @click="clearAll"
+      <transition-group name="notif-list" tag="div">
+        <div
+          v-for="notif in filteredNotifications"
+          :key="notif.id"
+          class="notif-item"
+          :class="{ 'notif-unread': !notif.read }"
+          @click="markRead(notif.id)"
         >
-          <v-icon start size="14">mdi-trash-can-outline</v-icon>
-          {{ t('notifications.clearAll') }}
-        </v-btn>
-      </v-card-actions>
+          <div class="unread-dot" v-if="!notif.read" />
 
-    </v-card>
-  </v-dialog>
+          <div class="notif-icon-wrap" :class="`notif-icon-${notif.type}`">
+            <v-icon size="18" :color="typeColor(notif.type)">{{ typeIcon(notif.type) }}</v-icon>
+          </div>
+
+          <div class="notif-body">
+            <div class="notif-title">{{ notif.title }}</div>
+            <div class="notif-message">{{ notif.message }}</div>
+            <div class="notif-time">{{ notif.time }}</div>
+          </div>
+
+          <v-btn
+            icon
+            variant="text"
+            size="x-small"
+            class="notif-delete"
+            @click.stop="deleteNotif(notif.id)"
+          >
+            <v-icon size="14" color="rgba(173,228,242,0.35)">mdi-close</v-icon>
+          </v-btn>
+        </div>
+      </transition-group>
+
+      <div v-if="isLoading && filteredNotifications.length > 0" class="load-more-state">
+        <v-progress-circular indeterminate color="#44d7c5" size="20" width="3" />
+      </div>
+    </v-card-text>
+
+    <!-- Footer -->
+    <v-divider color="rgba(58,168,232,0.1)" />
+    <v-card-actions class="px-4 py-3 d-flex justify-space-between">
+      <span class="footer-count">{{ t('notifications.totalUnread', { total: totalCount, unread: displayUnreadCount }) }}</span>
+      <v-btn
+        variant="text"
+        size="small"
+        class="clear-btn"
+        :disabled="notifications.length === 0"
+        @click="clearAll"
+      >
+        <v-icon start size="14">mdi-trash-can-outline</v-icon>
+        {{ t('notifications.clearAll') }}
+      </v-btn>
+    </v-card-actions>
+  </OceanCardDialogShell>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import OceanCardDialogShell from '~/components/common/OceanCardDialogShell.vue'
+
 const { t } = useFrontendI18n()
 
 export type NotifType = 'success' | 'error' | 'info' | 'warning' | 'system'
@@ -180,10 +161,10 @@ const displayUnreadCount = computed(() => props.unreadTotal ?? unreadCount.value
 const totalCount = computed(() => props.total ?? notifications.value.length)
 
 const tabs = computed(() => [
-  { key: 'all'     as const, label: t('notifications.all'),      },
-  { key: 'unread'  as const, label: t('notifications.unread'),  count: displayUnreadCount.value    },
+  { key: 'all'     as const, label: t('notifications.all') },
+  { key: 'unread'  as const, label: t('notifications.unread'), count: displayUnreadCount.value },
   { key: 'success' as const, label: t('notifications.rewards'), count: notifications.value.filter(n => n.type === 'success').length },
-  { key: 'warning' as const, label: t('notifications.alerts'),  count: notifications.value.filter(n => n.type === 'warning' || n.type === 'error').length },
+  { key: 'warning' as const, label: t('notifications.alerts'), count: notifications.value.filter(n => n.type === 'warning' || n.type === 'error').length },
 ])
 
 const filteredNotifications = computed(() => {
@@ -218,10 +199,6 @@ function clearAll() {
   notifications.value = []
   emit('clear-all')
   void maybeLoadMore()
-}
-
-function close() {
-  dialogVisible.value = false
 }
 
 function requestMore() {
@@ -278,9 +255,7 @@ function push(notif: Omit<Notification, 'id' | 'read'>) {
 defineExpose({ push })
 
 watch(() => dialogVisible.value, (isOpen) => {
-  if (isOpen) {
-    void maybeLoadMore()
-  }
+  if (isOpen) void maybeLoadMore()
 })
 
 watch(() => props.notifications?.length ?? 0, () => {
@@ -293,31 +268,10 @@ watch(activeTab, () => {
 </script>
 
 <style scoped>
-.ocean-card {
-  background: linear-gradient(180deg, #0a1929 0%, #051928 55%, #0a2240 100%) !important;
-  border: 1.5px solid rgba(26, 111, 168, 0.5) !important;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+.notif-card {
   max-height: 88dvh;
 }
 
-.ocean-header {
-  background: linear-gradient(90deg, rgba(26, 111, 168, 0.22), transparent);
-  border-bottom: 1px solid rgba(58, 168, 232, 0.15);
-  flex-shrink: 0;
-}
-
-.header-icon {
-  width: 34px; height: 34px;
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-  background: rgba(68, 215, 197, 0.12);
-  border: 1px solid rgba(68, 215, 197, 0.3);
-}
-
-/* Mark all button */
 .mark-all-btn {
   font-size: 11px !important;
   color: rgba(68, 215, 197, 0.75) !important;
@@ -325,7 +279,6 @@ watch(activeTab, () => {
   letter-spacing: 0.02em;
 }
 
-/* Filter tabs */
 .filter-tabs {
   display: flex;
   gap: 4px;
@@ -369,7 +322,6 @@ watch(activeTab, () => {
   text-align: center;
 }
 
-/* Scrollable list */
 .notif-scroll {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -378,7 +330,6 @@ watch(activeTab, () => {
   max-height: 420px;
 }
 
-/* Empty state */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -399,7 +350,6 @@ watch(activeTab, () => {
   padding: 16px;
 }
 
-/* Notification item */
 .notif-item {
   position: relative;
   display: flex;
@@ -423,7 +373,6 @@ watch(activeTab, () => {
   border-bottom: none;
 }
 
-/* Unread dot */
 .unread-dot {
   position: absolute;
   top: 18px;
@@ -435,7 +384,6 @@ watch(activeTab, () => {
   flex-shrink: 0;
 }
 
-/* Icon */
 .notif-icon-wrap {
   width: 36px;
   height: 36px;
@@ -453,7 +401,6 @@ watch(activeTab, () => {
 .notif-icon-warning { background: rgba(250, 199, 117, 0.12); border: 1px solid rgba(250, 199, 117, 0.28); }
 .notif-icon-system  { background: rgba(173, 228, 242, 0.08); border: 1px solid rgba(173, 228, 242, 0.15); }
 
-/* Body */
 .notif-body {
   flex: 1;
   min-width: 0;
@@ -482,7 +429,6 @@ watch(activeTab, () => {
   letter-spacing: 0.03em;
 }
 
-/* Delete button */
 .notif-delete {
   flex-shrink: 0;
   opacity: 0;
@@ -493,7 +439,6 @@ watch(activeTab, () => {
   opacity: 1;
 }
 
-/* Footer */
 .footer-count {
   font-size: 11px;
   color: rgba(173, 228, 242, 0.38);
@@ -506,7 +451,6 @@ watch(activeTab, () => {
   letter-spacing: 0.02em;
 }
 
-/* Transition */
 .notif-list-enter-active,
 .notif-list-leave-active {
   transition: all 0.2s ease;
@@ -518,12 +462,5 @@ watch(activeTab, () => {
 .notif-list-leave-to {
   opacity: 0;
   transform: translateX(16px);
-}
-
-/* Fullscreen xs */
-:deep(.v-dialog--fullscreen) .ocean-card {
-  border-radius: 0 !important;
-  border: none !important;
-  max-height: 100dvh;
 }
 </style>

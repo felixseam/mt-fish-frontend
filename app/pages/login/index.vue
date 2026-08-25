@@ -9,9 +9,9 @@ type Errors = {
   password?: string;
 };
 
-definePageMeta({
-  layout: false,
-});
+// definePageMeta({
+//   layout: false,
+// });
 
 const showPassword = ref(false);
 const isLoggingIn = ref(false);

@@ -151,6 +151,7 @@ export async function createCannonBetUi(options?: {
   }) => Promise<{
     isKill?: boolean;
     killReward?: number;
+    killOdd?: number;
     isReward?: boolean;
     reward?: number;
     isJackpot?: boolean;
@@ -696,15 +697,21 @@ export async function createCannonBetUi(options?: {
                     } else {
                       const multiplier = bet > 0 ? amount / bet : 0;
                       const pattern =
-                        amount <= 10
+                        multiplier < 3
                           ? "single"
-                          : amount <= 50
+                          : multiplier < 5
                             ? "ring"
-                            : multiplier >= 20
+                            : multiplier < 10
                               ? "star"
-                              : amount <= 200
-                                ? "filled_circle"
-                                : "diamond";
+                              : multiplier < 15
+                                ? "triangle"
+                                : multiplier < 20
+                                  ? "cross"
+                                  : multiplier < 25
+                                    ? "diamond"
+                                    : multiplier < 50
+                                      ? "filled_circle"
+                                      : "hexagon";
 
                       showRewardEffect({
                         layer: rewardLayer,

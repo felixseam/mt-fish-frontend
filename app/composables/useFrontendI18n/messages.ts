@@ -103,7 +103,8 @@ export const frontendMessages = {
     },
     balance: {
       insufficientTitle: "Your balance is insufficient",
-      insufficientMessage: "You don't have enough coins to place this bet. Exchange your real money balance for coins.",
+      notEnoughBalanceTitle: "Insufficient Balance",
+      notEnoughBalanceMessage: "You don't have enough balance to place this bet",
       notEnoughCoinsTitle: "Not Enough Coins",
       notEnoughCoinsMessage: "You don't have enough coins to place this bet.",
       notEnoughCoinsSubmessage: "Exchange your balance for coins to continue playing.",
@@ -265,8 +266,8 @@ export const frontendMessages = {
       failedMessage: "ចូលប្រើបរាជ័យ។ សូមព្យាយាមម្តងទៀត។",
     },
     balance: {
-      insufficientTitle: "សមតុល្យរបស់អ្នកមិនគ្រប់គ្រាន់ទេ",
-      insufficientMessage: "អ្នកមិនមានកាក់គ្រប់គ្រាន់សម្រាប់ភ្នាល់នេះទេ។ សូមប្តូរសមតុល្យប្រាក់ពិតរបស់អ្នកទៅជាកាក់។",
+      notEnoughBalanceTitle: "សមតុល្យមិនគ្រប់គ្រាន់",
+      notEnoughBalanceMessage: "សមតុល្យរបស់អ្នកមិនគ្រប់គ្រាន់សម្រាប់ដាក់ភ្នាល់នេះទេ",
       notEnoughCoinsTitle: "កាក់មិនគ្រប់គ្រាន់",
       notEnoughCoinsMessage: "អ្នកមិនមានកាក់គ្រប់គ្រាន់សម្រាប់ដាក់ភ្នាល់នេះទេ។",
       notEnoughCoinsSubmessage: "សូមប្តូរសមតុល្យរបស់អ្នកទៅជាកាក់ ដើម្បីបន្តលេង។",

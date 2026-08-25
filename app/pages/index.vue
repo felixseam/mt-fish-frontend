@@ -6,14 +6,13 @@
     :auto-countdown="sessionExpiredAutoCountdown" @refresh="handleSessionExpiredRefresh" />
 
   <ProfileDialog v-model="isProfileDialogOpen" :current-avatar="memberStore.info.avatar || '/avatar/Avatar6.png'"
-    :username="memberStore.info.user_name || 'Player'" @avatar-changed="handleAvatarChanged"
-    @coin-transaction="handleCoinTransaction" />
+    :username="memberStore.info.user_name || 'Player'" @avatar-changed="handleAvatarChanged" />
 
   <Notificationdialog v-model="isNotificationDialogOpen" :notifications="notifications" @mark-read="handleMarkRead"
     @mark-all-read="handleMarkAllRead" @delete="handleDeleteNotification" @clear-all="handleClearAllNotifications" />
 
-  <!-- <Insufficientbalancedialog v-model="isInsufficientBalanceDialogOpen" :current-balance="currentCoins"
-    @purchase-confirmed="handleCoinPurchase" /> -->
+  <InsufficientBalanceDialog v-model="isInsufficientBalanceDialogOpen" :current-balance="currentBalance"
+    :required-balance="requiredBalance" :currency-code="currentCurrencyCode" />
 
   <GameSettingsDialog v-model="isGameSettingsDialogOpen" />
   <StatementSheet ref="statementSheetRef" />
@@ -25,14 +24,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameSettingsDialog from '~/components/GameSettingsDialog.vue'
-import Insufficientbalancedialog from '~/components/Insufficientbalancedialog.vue'
 import LogoutDialog from '~/components/LogoutDialog.vue'
 import Notificationdialog from '~/components/Notificationdialog.vue'
 import ProfileDialog from '~/components/ProfileDialog.vue'
 import StatementSheet from '~/components/StatementSheet.vue'
 import TransactionSheet from '~/components/TransactionSheet.vue'
+import InsufficientBalanceDialog from '~/components/Insufficientbalancedialog.vue'
 import type { Notification } from '~/components/Notificationdialog.vue'
-import type { PurchasePayload } from '~/components/Insufficientbalancedialog.vue'
 import { useFishGameplayScene } from '~/composables/game_core/game/useFishGameplayScene'
 import {
   deleteNotification,
@@ -53,6 +51,7 @@ const isLogoutDialogOpen = ref(false)
 // const isGamePausedDialogOpen = ref(false)
 const isSessionExpiredDialogOpen = ref(false)
 const sessionExpiredAutoCountdown = ref(false)
+const requiredBalance = ref(0)
 const notifications = ref<Notification[]>([])
 const notificationTotal = ref(0)
 const notificationUnreadTotal = ref(0)
@@ -68,8 +67,16 @@ const { mount, destroy, setPlayerAvatar } = useFishGameplayScene()
 const notificationsPerPage = 10
 const hasEnteredExperience = computed(() => experienceStore.entered)
 let hasBootstrappedExperience = false
+const broadcastStore = useBroadcastStore()
 
-// const currentCoins = computed(() => Number(memberStore.info.coin_amount ?? '0') || 0)
+const activeBalance = computed(() =>
+  memberStore.info.balances?.find(
+    (b) => b.currency_id === memberStore.selectedCurrencyID,
+  ),
+)
+const currentBalance = computed(() => Number(activeBalance.value?.balance_amount ?? '0') || 0)
+const currentCurrencyCode = computed(() => activeBalance.value?.currency_code ?? 'USD')
+
 const hasMoreNotifications = computed(() => notifications.value.length < notificationTotal.value)
 
 function formatNotificationTime(createdAt: string): string {
@@ -84,6 +91,8 @@ function formatNotificationTime(createdAt: string): string {
     timeStyle: 'short',
   }).format(date)
 }
+
+
 
 // function handleResume() {
 //   isGamePausedDialogOpen.value = false
@@ -231,10 +240,6 @@ async function handleClearAllNotifications() {
   )
 }
 
-function handleCoinPurchase(_payload: PurchasePayload) {
-  // Coin display is now driven by websocket updates through memberStore.
-}
-
 function handleSessionExpiredRefresh() {
   window.location.reload()
 }
@@ -243,11 +248,8 @@ function handleAvatarChanged(path: string) {
   setPlayerAvatar(path)
 }
 
-function handleCoinTransaction() {
-  isInsufficientBalanceDialogOpen.value = true
-}
-
 function handleLogoutConfirm() {
+  hasBootstrappedExperience = false
   memberStore.reset()
   experienceStore.resetExperience()
   destroy()
@@ -255,6 +257,7 @@ function handleLogoutConfirm() {
 }
 
 async function bootstrapExperience() {
+  console.log("bootstrapExperience called")
   if (hasBootstrappedExperience || !hasEnteredExperience.value) return
 
   hasBootstrappedExperience = true
@@ -295,7 +298,8 @@ async function bootstrapExperience() {
     onLogout: () => {
       isLogoutDialogOpen.value = true
     },
-    onInsufficientBalance: () => {
+    onInsufficientBalance: (payload) => {
+      requiredBalance.value = payload.requiredCoins
       isInsufficientBalanceDialogOpen.value = true
     },
     onSessionSyncLost: () => {
@@ -307,14 +311,24 @@ async function bootstrapExperience() {
   })
 }
 
-onMounted(() => {
-  void bootstrapExperience()
+onMounted(async () => {
+  experienceStore.enterExperience()
+  try {
+    await broadcastStore.connectWebSocket()
+  } catch (err) {
+    console.error(err)
+  }
+
+  await bootstrapExperience()
 })
 
 watch(
   hasEnteredExperience,
   (entered) => {
+    console.log("entered =", entered)
+
     if (!entered) return
+
     void bootstrapExperience()
   },
   { immediate: true },

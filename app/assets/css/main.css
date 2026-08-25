@@ -16,7 +16,7 @@ body,
 body {
   margin: 0;
   color: var(--aa-text);
-  font-family: "Poppins", "Battambang", sans-serif;
+  font-family: "Poppins", "Battambang", sans-serif !important;
   background: #030a11;
   overflow: hidden;
 }
@@ -31,6 +31,17 @@ input {
   font: inherit;
 }
 
+/* Vuetify overrides text-transform on v-btn by default, so target it explicitly */
+.v-btn {
+  text-transform: capitalize !important;
+  letter-spacing: normal !important;
+}
+
+/* Keep Vuetify's own multi-word labels from double-capitalizing weirdly */
+.v-btn__content {
+  text-transform: capitalize !important;
+}
+
 .aa-pixi-mount {
   height: 100dvh;
   width: 100%;
@@ -39,4 +50,25 @@ input {
   justify-content: center;
   overflow: hidden;
   background: #030a11;
+}
+
+
+.v-application,
+.v-overlay-container {
+  font-family: "Poppins", "Battambang", sans-serif !important;
+}
+[data-sonner-toaster],
+[data-sonner-toast],
+[data-sonner-toast] [data-title],
+[data-sonner-toast] [data-description],
+[data-sonner-toast] [data-button] {
+  font-family: "Poppins", "Battambang", sans-serif !important;
+}
+
+[data-sonner-toaster],
+[data-sonner-toast],
+[data-sonner-toast] [data-title],
+[data-sonner-toast] [data-description],
+[data-sonner-toast] [data-button] {
+  font-family: "Poppins", "Battambang", sans-serif !important;
 }

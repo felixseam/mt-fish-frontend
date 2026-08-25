@@ -537,10 +537,8 @@ function getSpineManifsFromApi(): Array<{ json: string; atlas: string }> {
 }
 
 async function preloadSpines(): Promise<void> {
-  // Static spines from tree
   const staticSpines = [...ALL_SPINE_MANIFESTS];
 
-  // Dynamic spines from API
   const apiSpines = getSpineManifsFromApi();
 
   const all = [...staticSpines, ...apiSpines];
@@ -563,7 +561,6 @@ async function preloadSpines(): Promise<void> {
   );
 }
 
-// ── Main preload ──────────────────────────────────────────────────────────────
 async function preloadAppAssets(): Promise<void> {
   if (appAssetPreloadPromise) {
     await appAssetPreloadPromise;

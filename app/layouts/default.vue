@@ -22,7 +22,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 const { t } = useFrontendI18n();
 const isMobileDevice = ref(false);
 const isPortraitMode = ref(false);
-const broadcastStore = useBroadcastStore()
 const showOrientationOverlay = computed(
   () => isMobileDevice.value && isPortraitMode.value,
 );
@@ -56,7 +55,7 @@ onMounted(async () => {
   portraitMediaQuery.addEventListener("change", updateOrientationState);
   window.addEventListener("resize", updateOrientationState);
   updateOrientationState();
-  await broadcastStore.connectWebSocket()
+
 });
 
 onBeforeUnmount(() => {

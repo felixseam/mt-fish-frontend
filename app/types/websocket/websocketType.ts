@@ -20,8 +20,6 @@ export type BroadcastResponse = {
   };
 };
 
-
-
 export interface BroadcastState {
   broadcastResponse: BroadcastResponse;
 }

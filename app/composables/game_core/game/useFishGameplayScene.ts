@@ -65,6 +65,7 @@ type FishPerfDebugOptions = FishContextPerfOptions & {
 type PlayerBalance = {
   currencyId: number;
   code: string;
+  symbol: string;
   amount: number;
 };
 
@@ -78,7 +79,11 @@ const NAGA_ATLAS_URL = "/fish/fish-all-star/resources/naga.atlas.txt";
 
 const PROFILE_UI_X = 12;
 const PROFILE_UI_Y = 12;
-const PAUSE_RELOAD_THRESHOLD_MS = 30_000;
+// Threshold before we tell the caller "player has been away a very long
+// time" (e.g. show a manual-refresh dialog because the session may have
+// truly expired server-side). This does NOT trigger a reload by itself —
+// coming back before this fires always resumes cleanly with no refresh.
+const PAUSE_RELOAD_THRESHOLD_MS = 10 * 60_000; // 10 minutes
 const DESKTOP_MAX_RESOLUTION = 2;
 const IOS_MAX_RESOLUTION = 1.5;
 const IOS_TARGET_RENDER_PIXELS = 950_000;
@@ -214,6 +219,7 @@ export function useFishGameplayScene() {
   let bannerLayer: PIXI.Container<PIXI.DisplayObject> | null = null;
   let uiLayer: PIXI.Container<PIXI.DisplayObject> | null = null;
   let currentSceneDisplay: SceneDisplay | null = null;
+  let isSessionRotating = false;
   let cannonBetUi: Awaited<ReturnType<typeof createCannonBetUi>> | null = null;
   let playerProfileUi: Awaited<
     ReturnType<typeof createPlayerProfileUi>
@@ -222,6 +228,21 @@ export function useFishGameplayScene() {
   let onSessionSyncLostHandler: (() => void) | null = null;
 
   let debugRect: PIXI.Graphics | null = null;
+
+
+function buildSnapshotPayload() {
+  return {
+    total_elapsed_seconds: getElapsedSecondsString(),
+    current_context_index: contextMachine?.getRuntimeState().current_context_index ?? null,
+    current_group_id: contextMachine?.getRuntimeState().current_group_id ?? null,
+    current_scene_id: contextMachine?.getRuntimeState().current_scene_id ?? currentSceneId.value,
+    boss_scene_active: contextMachine?.getRuntimeState().boss_scene_active ?? false,
+    boss_scene_lock_id: contextMachine?.getRuntimeState().boss_scene_lock_id ?? "",
+    spawn_cursor: contextMachine?.getRuntimeState().spawn_cursor ?? 0,
+    runtime_state_json: contextMachine?.getRuntimeState() ?? {},
+    device_meta_json: {},
+  };
+}
 
   function drawDebugRect() {
     if (!debugRect) return;
@@ -280,10 +301,9 @@ export function useFishGameplayScene() {
   let rendererResizeCount = 0;
 
   let avatarClickHandler: (() => void) | null = null;
+  let onResumeHandler: (() => void) | null = null;
 
   // ── Multi-currency balance state ─────────────────────────────────────────
-  // Replaces the old single `currentCoins` figure. Populated from
-  // memberInfo.balances on mount and kept in sync via the watcher below.
   let currentBalances: PlayerBalance[] = [];
   // ── Game manifest (cannon types / bet amounts per currency, etc.) ───────
   let gameManifest: GameManifest | null = null;
@@ -451,13 +471,11 @@ export function useFishGameplayScene() {
     if (!menuUi) return;
 
     if (isTouchLikeDevice) {
-      // Top-right on iPhone / touch devices
       menuUi.container.position.set(
         GAME_WIDTH - MENU_BTN_SIZE_TOUCH - MENU_BTN_MARGIN,
         MENU_BTN_TOP_MARGIN,
       );
     } else {
-      // Unchanged desktop position: left-middle
       menuUi.container.position.set(12, GAME_HEIGHT / 2 - 50);
     }
   }
@@ -908,51 +926,66 @@ export function useFishGameplayScene() {
     }
   }
 
-  // function resumeGame() {
-  //   if (!pixiApp || !isGamePausedByFocus) return;
-  //   if (pauseReloadTimer) {
-  //     clearTimeout(pauseReloadTimer);
-  //     pauseReloadTimer = null;
-  //   }
-  //   isGamePausedByFocus = false;
-  //   contextMachine?.setPaused(false);
-  //   pixiApp.ticker.start();
-  //   gameAudio.resumeFromBackground();
+  // ── Resume: called when tab/app becomes visible again after being
+  // paused. This is the "no refresh needed" path — it restarts the
+  // ticker, resumes audio, resumes the snapshot loop, flushes anything
+  // that was waiting on a bet resolution while paused, and asks the
+  // caller (via onResume) to re-sync balances / reconnect the websocket
+  // if it wants to. Session (`sessionRuntime.session`) is never touched,
+  // so there's nothing to re-open.
+  function resumeGame() {
+    if (!pixiApp || !isGamePausedByFocus) return;
+    if (pauseReloadTimer) {
+      clearTimeout(pauseReloadTimer);
+      pauseReloadTimer = null;
+    }
+    isGamePausedByFocus = false;
+    contextMachine?.setPaused(false);
+    pixiApp.ticker.start();
+    gameAudio.resumeFromBackground();
 
-  //   // sessionRuntime.resumeSnapshotLoop(
-  //   //   () => ({
-  //   //     total_elapsed_seconds: getElapsedSecondsString(),
-  //   //     current_context_index:
-  //   //       contextMachine?.getRuntimeState().current_context_index ?? null,
-  //   //     current_group_id:
-  //   //       contextMachine?.getRuntimeState().current_group_id ?? null,
-  //   //     current_scene_id:
-  //   //       contextMachine?.getRuntimeState().current_scene_id ??
-  //   //       currentSceneId.value,
-  //   //     boss_scene_active:
-  //   //       contextMachine?.getRuntimeState().boss_scene_active ?? false,
-  //   //     boss_scene_lock_id:
-  //   //       contextMachine?.getRuntimeState().boss_scene_lock_id ?? "",
-  //   //     spawn_cursor: contextMachine?.getRuntimeState().spawn_cursor ?? 0,
-  //   //     runtime_state_json: contextMachine?.getRuntimeState() ?? {},
-  //   //     device_meta_json: {},
-  //   //   }),
-  //   //   {
-  //   //     maxFailuresBeforeSyncLost: 3,
-  //   //     onSyncLost: () => {
-  //   //       sessionSyncLost = true;
-  //   //       onSessionSyncLostHandler?.();
-  //   //     },
-  //   //   },
-  //   // );
+    sessionRuntime.resumeSnapshotLoop(
+      () => ({
+        total_elapsed_seconds: getElapsedSecondsString(),
+        current_context_index:
+          contextMachine?.getRuntimeState().current_context_index ?? null,
+        current_group_id:
+          contextMachine?.getRuntimeState().current_group_id ?? null,
+        current_scene_id:
+          contextMachine?.getRuntimeState().current_scene_id ??
+          currentSceneId.value,
+        boss_scene_active:
+          contextMachine?.getRuntimeState().boss_scene_active ?? false,
+        boss_scene_lock_id:
+          contextMachine?.getRuntimeState().boss_scene_lock_id ?? "",
+        spawn_cursor: contextMachine?.getRuntimeState().spawn_cursor ?? 0,
+        runtime_state_json: contextMachine?.getRuntimeState() ?? {},
+        device_meta_json: {},
+      }),
+      {
+        maxFailuresBeforeSyncLost: 3,
+        onSyncLost: () => {
+          sessionSyncLost = true;
+          onSessionSyncLostHandler?.();
+        },
+      },
+    );
 
-  //   if (pendingWhilePaused.length > 0) {
-  //     const pending = pendingWhilePaused.splice(0);
-  //     setTimeout(() => {
-  //       for (const flush of pending) flush();
-  //     }, 50);
-  //   }
-  // }
+    if (pendingWhilePaused.length > 0) {
+      const pending = pendingWhilePaused.splice(0);
+      setTimeout(() => {
+        for (const flush of pending) flush();
+      }, 50);
+    }
+
+    // Let the page component re-fetch balances / reconnect websocket etc.
+    onResumeHandler?.();
+    // Balances themselves are refreshed directly here too, so the coin
+    // box is accurate even if the caller doesn't implement onResume.
+    void memberStore.fetchMyInfo().catch((err) => {
+      console.error("[fish-scene] resume balance refresh failed", err);
+    });
+  }
 
   function renderScene(
     index: number,
@@ -1061,10 +1094,15 @@ export function useFishGameplayScene() {
       }) => void;
       isInputBlocked?: () => boolean;
       onSessionSyncLost?: () => void;
+      // Fired right after resumeGame() finishes its internal work.
+      // Use this to reconnect the websocket / re-sync anything owned
+      // by the page component (e.g. broadcastStore).
+      onResume?: () => void;
     },
   ) {
     avatarClickHandler = options?.onAvatarClick ?? null;
     onSessionSyncLostHandler = options?.onSessionSyncLost ?? null;
+    onResumeHandler = options?.onResume ?? null;
     menuHandlers = {
       onMute: options?.onMute,
       onInfo: options?.onInfo,
@@ -1075,22 +1113,23 @@ export function useFishGameplayScene() {
       onLogout: options?.onLogout,
     };
 
-    // function setGamePaused(paused: boolean) {
-    //   if (!pixiApp) return;
-    //   if (paused) {
-    //     if (isGamePausedByFocus) return;
-    //     isGamePausedByFocus = true;
-    //     contextMachine?.setPaused(true);
-    //     pixiApp.ticker.stop();
-    //     // sessionRuntime.pauseSnapshotLoop();
-    //     gameAudio.pauseForBackground();
-    //     pauseReloadTimer = setTimeout(() => {
-    //       pauseReloadTimer = null;
-    //       options?.onPauseTooLong?.();
-    //     }, PAUSE_RELOAD_THRESHOLD_MS);
-    //     return;
-    //   }
-    // }
+    function setGamePaused(paused: boolean) {
+      if (!pixiApp) return;
+      if (paused) {
+        if (isGamePausedByFocus) return;
+        isGamePausedByFocus = true;
+        contextMachine?.setPaused(true);
+        pixiApp.ticker.stop();
+        sessionRuntime.pauseSnapshotLoop();
+        gameAudio.pauseForBackground();
+        pauseReloadTimer = setTimeout(() => {
+          pauseReloadTimer = null;
+          options?.onPauseTooLong?.();
+        }, PAUSE_RELOAD_THRESHOLD_MS);
+        return;
+      }
+      resumeGame();
+    }
 
     await memberStore.fetchMyInfo();
     const memberInfo = memberStore.info;
@@ -1099,6 +1138,7 @@ export function useFishGameplayScene() {
     currentBalances = (memberInfo.balances ?? []).map((b) => ({
       currencyId: b.currency_id,
       code: b.currency_code,
+      symbol: b.currency_symbol,
       amount: parseFloat(b.balance_amount ?? "0"),
     }));
     if (memberStore.selectedCurrencyID == null) {
@@ -1173,7 +1213,7 @@ export function useFishGameplayScene() {
     cannonBetUi = await createCannonBetUi({
       getCollisionTargets: getCachedCollisionTargets,
       isInputBlocked: () =>
-        sessionSyncLost || Boolean(options?.isInputBlocked?.()),
+        sessionSyncLost || isSessionRotating || Boolean(options?.isInputBlocked?.()),
       getCurrentBalance: () =>
         currentBalances.find((b) => b.currencyId === memberStore.selectedCurrencyID,)
           ?.amount ?? 0,
@@ -1203,6 +1243,7 @@ export function useFishGameplayScene() {
           const isJackpot = response?.result.is_jackpot;
           const jackpotReward =
             response?.result.reward.jackpot_reward.payout_amount;
+            const killOdd = response?.result.reward.kill_reward.reward_odd
 
           if (isKill && target.display) {
             contextMachine?.playKillAnimationForDisplay(target.display);
@@ -1211,10 +1252,11 @@ export function useFishGameplayScene() {
           const result = {
             isKill,
             isReward,
+            killOdd: Number(killOdd ?? 0),
             isJackpot,
-            killReward: Math.max(0, Number(killReward ?? 0)),
-            reward: Math.max(0, Number(reward ?? 0)),
-            jackpotReward: Math.max(0, Number(jackpotReward ?? 0)),
+            killReward: Number(killReward ?? 0),
+            reward: Number(reward ?? 0),
+            jackpotReward:  Number(jackpotReward ?? 0),
           };
 
           if (isGamePausedByFocus) {
@@ -1312,16 +1354,35 @@ export function useFishGameplayScene() {
     const fishFactory = createFishRendererFactory({
       getAtlasTexture,
     });
-    const machine = createFishContextMachine({
-      app: pixiApp,
-      fishLayer,
-      fishFactory,
-      onSceneChange: switchSceneById,
-      getFishChildScale: () => fishChildScale,
-      initialRuntimeState:
-        (boot?.session?.runtime_state_json as Record<string, unknown>) ?? null,
-      perfOptions: perfDebugOptions,
-    });
+const machine = createFishContextMachine({
+  app: pixiApp,
+  fishLayer,
+  fishFactory,
+  onSceneChange: switchSceneById,
+  getFishChildScale: () => fishChildScale,
+  initialRuntimeState: (boot?.session?.runtime_state_json as Record<string, unknown>) ?? null,
+  perfOptions: perfDebugOptions,
+  onContextWipe: async () => {
+    if (sessionSyncLost) return; // already broken — don't compound it with a rotation attempt
+    isSessionRotating = true;
+    try {
+      await sessionRuntime.rotateSession(1, buildSnapshotPayload);
+      sessionRuntime.startSnapshotLoop(buildSnapshotPayload, {
+        maxFailuresBeforeSyncLost: 3,
+        onSyncLost: () => {
+          sessionSyncLost = true;
+          onSessionSyncLostHandler?.();
+        },
+      });
+    } catch (err) {
+      console.error("[fish-scene] session rotation on wave wipe failed", err);
+      sessionSyncLost = true;
+      onSessionSyncLostHandler?.();
+    } finally {
+      isSessionRotating = false;
+    }
+  },
+});
     contextMachine = machine;
     machine.start();
     startPerfProbe();
@@ -1360,36 +1421,41 @@ export function useFishGameplayScene() {
     });
     resizeObserver.observe(container);
 
-    // visibilityHandler = () => {
-    //   if (document.hidden) {
-    //     setGamePaused(true);
-    //   } else {
-    //     setGamePaused(false);
-    //   }
-    // };
+    // These three listeners are what actually detect "player left and
+    // came back" — tab switch (visibilitychange), window blur/focus
+    // (alt-tab, switching apps). Coming back fires setGamePaused(false)
+    // → resumeGame(), no reload involved.
+    visibilityHandler = () => {
+      if (document.hidden) {
+        setGamePaused(true);
+      } else {
+        setGamePaused(false);
+      }
+    };
 
-    // windowBlurHandler = () => {
-    //   setGamePaused(true);
-    // };
+    windowBlurHandler = () => {
+      setGamePaused(true);
+    };
 
-    // windowFocusHandler = () => {
-    //   if (!document.hidden) {
-    //     setGamePaused(false);
-    //   }
-    // };
+    windowFocusHandler = () => {
+      if (!document.hidden) {
+        setGamePaused(false);
+      }
+    };
 
-    // document.addEventListener("visibilitychange", visibilityHandler);
-    // window.addEventListener("blur", windowBlurHandler);
-    // window.addEventListener("focus", windowFocusHandler);
+    document.addEventListener("visibilitychange", visibilityHandler);
+    window.addEventListener("blur", windowBlurHandler);
+    window.addEventListener("focus", windowFocusHandler);
 
-    // if (document.hidden) {
-    //   setGamePaused(true);
-    // }
+    if (document.hidden) {
+      setGamePaused(true);
+    }
   }
 
   function destroy() {
     pendingWhilePaused = [];
     onSessionSyncLostHandler = null;
+    onResumeHandler = null;
     if (pauseReloadTimer) {
       clearTimeout(pauseReloadTimer);
       pauseReloadTimer = null;
@@ -1470,14 +1536,13 @@ export function useFishGameplayScene() {
   }
 
   // ── Keep local balance state + UI in sync with the member store ─────────
-  // ── Balances watcher: stop touching the removed activeCurrencyId,
-  //    fall back to the store instead ────────────────────────────────────
   watch(
     () => memberStore.info.balances,
     (balances) => {
       currentBalances = (balances ?? []).map((b) => ({
         currencyId: b.currency_id,
         code: b.currency_code,
+        symbol: b.currency_symbol,
         amount: Math.max(0, Number(b.balance_amount ?? "0") || 0),
       }));
       if (memberStore.selectedCurrencyID == null) {
@@ -1511,6 +1576,6 @@ export function useFishGameplayScene() {
       );
     },
     isSessionSyncLost: () => sessionSyncLost,
-    // resumeGame,
+    resumeGame,
   };
 }

@@ -4,29 +4,9 @@ import tailwindcss from "@tailwindcss/vite";
 import vuetify from "vite-plugin-vuetify";
 
 export default defineNuxtConfig({
-  /* =====================================================
-   * NUXT
-   * ===================================================== */
-
   ssr: false,
-
   compatibilityDate: "2025-07-15",
-
-  devtools: {
-    enabled: true,
-  },
-
-  devServer: {
-    port: 3000,
-    host: "0.0.0.0",
-  },
-
   modules: ["@pinia/nuxt", "@nuxtjs/google-fonts"],
-
-  /* =====================================================
-   * APP / PWA / MOBILE SAFARI
-   * ===================================================== */
-
   app: {
     head: {
       meta: [
@@ -35,34 +15,19 @@ export default defineNuxtConfig({
           content:
             "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover",
         },
-
-        /*
-         * Android / Chrome PWA
-         */
         {
           name: "mobile-web-app-capable",
           content: "yes",
         },
 
-        /*
-         * iOS Safari PWA
-         */
         {
           name: "apple-mobile-web-app-capable",
           content: "yes",
         },
-
-        /*
-         * Safari status bar
-         */
         {
           name: "apple-mobile-web-app-status-bar-style",
           content: "black-translucent",
         },
-
-        /*
-         * Browser theme
-         */
         {
           name: "theme-color",
           content: "#000000",
@@ -70,17 +35,10 @@ export default defineNuxtConfig({
       ],
 
       link: [
-        /*
-         * PWA manifest
-         */
         {
           rel: "manifest",
           href: "/manifest.json",
         },
-
-        /*
-         * iOS Home Screen icon
-         */
         {
           rel: "apple-touch-icon",
           href: "/icons/icon-192.png",
@@ -89,23 +47,11 @@ export default defineNuxtConfig({
     },
   },
 
-  /* =====================================================
-   * GLOBAL CSS
-   * ===================================================== */
 
   css: ["~/assets/css/main.css"],
-
-  /* =====================================================
-   * VUETIFY
-   * ===================================================== */
-
   build: {
     transpile: ["vuetify", "vue-sonner"],
   },
-
-  /* =====================================================
-   * VITE
-   * ===================================================== */
 
   vite: {
     plugins: [
@@ -121,9 +67,6 @@ export default defineNuxtConfig({
     },
   },
 
-  /* =====================================================
-   * RUNTIME CONFIG
-   * ===================================================== */
 
   runtimeConfig: {
     public: {
@@ -136,10 +79,6 @@ export default defineNuxtConfig({
       websocket: process.env.NUXT_WEBSOCKET_URL,
     },
   },
-
-  /* =====================================================
-   * GOOGLE FONTS
-   * ===================================================== */
 
   googleFonts: {
     outputDir: "assets/fonts/google",
@@ -161,5 +100,14 @@ export default defineNuxtConfig({
     preload: true,
 
     useStylesheet: true,
+  },
+
+  devtools: {
+    enabled: true,
+  },
+
+  devServer: {
+    port: 3000,
+    host: "0.0.0.0",
   },
 } as any);

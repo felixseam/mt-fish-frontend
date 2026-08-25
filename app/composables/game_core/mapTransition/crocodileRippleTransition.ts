@@ -134,21 +134,18 @@ export function runCrocodileRippleRevealTransition(
 
   const sceneRoot = targetLayer.parent as PIXI.Container;
 
-  // ── Step 1: Snapshot ONLY targetLayer (background) ────────────────────────
   const rt = PIXI.RenderTexture.create({
     width: W,
     height: H,
     resolution: renderer.resolution,
   });
 
-  // Hide everything in sceneRoot except targetLayer
   const siblingVisibility = new Map<PIXI.DisplayObject, boolean>();
   for (const child of sceneRoot.children) {
     siblingVisibility.set(child, child.visible);
     child.visible = child === targetLayer;
   }
 
-  // Hide everything in stage except sceneRoot
   const stageParent = sceneRoot.parent as PIXI.Container;
   const stageVisibility = new Map<PIXI.DisplayObject, boolean>();
   for (const child of stageParent.children) {
@@ -158,7 +155,6 @@ export function runCrocodileRippleRevealTransition(
 
   renderer.render(app.stage, { renderTexture: rt, clear: true });
 
-  // Restore visibility
   for (const [child, wasVisible] of siblingVisibility) {
     child.visible = wasVisible;
   }
@@ -166,7 +162,6 @@ export function runCrocodileRippleRevealTransition(
     child.visible = wasVisible;
   }
 
-  // ── Step 2: Add nextScene at bottom of targetLayer ────────────────────────
   if (nextScene.parent) {
     nextScene.parent.removeChild(nextScene);
   }
@@ -174,10 +169,8 @@ export function runCrocodileRippleRevealTransition(
   nextScene.alpha = 1;
   targetLayer.addChildAt(nextScene, 0);
 
-  // ── Step 3: Hide currentScene ─────────────────────────────────────────────
   currentScene.visible = false;
 
-  // ── Step 4: Build wipeSprite ──────────────────────────────────────────────
   const wipeSprite = new PIXI.Sprite(rt);
   wipeSprite.position.set(0, 0);
   wipeSprite.width = W;
@@ -186,12 +179,10 @@ export function runCrocodileRippleRevealTransition(
   const rippleFilter = new CrocodileRippleWipeFilter(W / H);
   wipeSprite.filters = [rippleFilter];
 
-  // ── Step 5: Insert inside sceneRoot between bg and fish ───────────────────
-  // So fish/UI stay visible above the wipe effect
+
   const bgIndex = sceneRoot.getChildIndex(targetLayer);
   sceneRoot.addChildAt(wipeSprite, bgIndex + 1);
 
-  // ── Tick ──────────────────────────────────────────────────────────────────
   const startTime = performance.now();
 
   const tick = () => {

@@ -2,7 +2,7 @@
   <v-app class="app-root">
     <VSonner position="top-right" :visible-toasts="4" />
 
-    <div :class="['app-shell', { 'app-shell--blocked': isAuthenticated && !hasEnteredExperience } ]">
+    <div :class="['app-shell', { 'app-shell--blocked': isAuthenticated && !hasEnteredExperience }]">
       <NuxtLayout>
         <NuxtPage />
       </NuxtLayout>
@@ -26,9 +26,9 @@
       <div class="app-preload__error">
         <p class="app-preload__error-title">Asset Preload Failed</p>
         <p class="app-preload__error-message">{{ preloadError }}</p>
-        <button type="button" class="app-preload__retry" @click="runPreload">
+        <!-- <button type="button" class="app-preload__retry" @click="runPreload">
           Retry
-        </button>
+        </button> -->
       </div>
     </div>
 
@@ -118,7 +118,52 @@ function animateProgressToAsync(target: number, stepMs = 30): Promise<void> {
   });
 }
 
-async function runPreload() {
+// Turns whatever got thrown (Error, string, ProgressEvent from a failed
+// asset/image load, API error payload, etc.) into a readable message
+// instead of collapsing everything to "Unable to preload game assets."
+function describePreloadError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+
+  if (typeof error === "string") return error;
+
+  if (error && typeof error === "object") {
+    const anyErr = error as Record<string, unknown>;
+    if (typeof anyErr.message === "string" && anyErr.message.length > 0) {
+      return anyErr.message;
+    }
+    if (typeof anyErr.statusMessage === "string" && anyErr.statusMessage.length > 0) {
+      return `${anyErr.statusMessage}${anyErr.statusCode ? ` (${anyErr.statusCode})` : ""}`;
+    }
+  }
+
+  if (typeof ProgressEvent !== "undefined" && error instanceof ProgressEvent) {
+    const target = error.target as { src?: string; currentSrc?: string } | null;
+    const src = target?.src ?? target?.currentSrc;
+    return src ? `Failed to load asset: ${src}` : "Failed to load a game asset.";
+  }
+
+  return "Unable to preload game assets.";
+}
+
+// --- NEW: detect an auth-shaped failure so we know when a retry is worth it ---
+function isUnauthorizedError(error: unknown): boolean {
+  if (error && typeof error === "object") {
+    const anyErr = error as Record<string, unknown>;
+    const status = anyErr.statusCode ?? anyErr.status ?? (anyErr.response as any)?.status;
+    if (status === 401) return true;
+    const msg = (typeof anyErr.message === "string" && anyErr.message) ||
+      (typeof anyErr.statusMessage === "string" && anyErr.statusMessage) || "";
+    if (/unauthorized|401/i.test(msg)) return true;
+  }
+  if (typeof error === "string" && /unauthorized|401/i.test(error)) return true;
+  return false;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runPreload(isRetry = false) {
   if (!isAuthenticated.value) return;
   if (manifestStore.ready && wasPreloadedThisSession()) {
     readyToEnter.value = true;
@@ -151,8 +196,22 @@ async function runPreload() {
     console.log("manifestStore=============================", manifestStore.cannonTypes)
   } catch (error) {
     clearProgressTimer();
-    preloadError.value =
-      error instanceof Error ? error.message : "Unable to preload game assets.";
+    console.error("[preload] failed:", error);
+
+    // --- NEW: if this is the *first* attempt and it looks like an auth
+    // race (token not yet attached to the http client), wait a beat and
+    // retry once automatically instead of showing the error screen.
+    // A refresh "fixes" this today because the token source is fully
+    // initialized before this component mounts on a hard reload; on an
+    // in-app auth transition there can be a brief gap.
+    if (!isRetry && isUnauthorizedError(error) && isAuthenticated.value) {
+      console.warn("[preload] got 401 on first attempt, retrying once after short delay");
+      await delay(400);
+      await runPreload(true);
+      return;
+    }
+
+    preloadError.value = describePreloadError(error);
     isPreloading.value = false;
   }
 }
@@ -189,10 +248,14 @@ async function enterExperience() {
   experienceStore.enterExperience();
 }
 
+// --- CHANGED: give one extra tick before the first attempt, so any
+// plugin/interceptor that reacts to auth state on the same tick has a
+// chance to finish setting up before we fire the manifest request.
 watch(
   isAuthenticated,
-  (authed) => {
+  async (authed) => {
     if (authed && !hasAttemptedThisLoad) {
+      await nextTick();
       void runPreload();
     }
   },
@@ -208,9 +271,6 @@ function handleOrientationChange(e: MediaQueryListEvent | MediaQueryList) {
   isPortrait.value = e.matches;
 }
 
-// Loading is considered "finished" once preload isn't running, there's no
-// error blocking it, and the user has either reached the tap-to-play gate
-// or already entered the experience.
 const loadingFinished = computed(
   () =>
     !isPreloading.value &&
@@ -218,9 +278,6 @@ const loadingFinished = computed(
     (readyToEnter.value || hasEnteredExperience.value),
 );
 
-// Show the rotate prompt only once it's safe to do so:
-// - unauthenticated users (e.g. login screen) see it immediately
-// - authenticated users only see it after loading has finished
 const showRotateOverlay = computed(() => {
   if (!isPortrait.value) return false;
   if (!isAuthenticated.value) return true;

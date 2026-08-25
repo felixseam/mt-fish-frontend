@@ -541,6 +541,7 @@ export function createFishContextMachine(options: {
   fishLayer: PIXI.Container;
   fishFactory: FishFactory;
   getFishChildScale: () => { x: number; y: number };
+  onContextWipe?: () => void | Promise<void>;
   onSceneChange: (
     sceneId: string,
     mode?: SceneChangeMode,
@@ -548,10 +549,10 @@ export function createFishContextMachine(options: {
   initialRuntimeState?: RestoredRuntimeState | null;
   perfOptions?: FishContextPerfOptions;
 }) {
-  const { app, fishLayer, fishFactory, getFishChildScale, onSceneChange } =
+  const { app, fishLayer, fishFactory, getFishChildScale, onSceneChange,onContextWipe  } =
     options;
   const perfOptions = options.perfOptions ?? {};
-
+  let isDestroyed = false;
   let currentContextIndex = -1;
   let currentGroupId: number | null = null;
   let lastContextNo: number | null = null;
@@ -1365,21 +1366,45 @@ export function createFishContextMachine(options: {
     if (pendingContextSwitch) {
       updateFish(deltaMs);
       if (
-        performance.now() >= pendingContextSwitch.activateAtMs &&
-        !pendingContextSwitch.isActivating
-      ) {
-        const { nextIndex, nextSceneId } = pendingContextSwitch;
-        pendingContextSwitch.isActivating = true;
-        currentNormalSceneId = nextSceneId;
-        Promise.resolve(switchScene(nextSceneId, "context_wipe"))
-          .catch((error) => {
-            console.error("[context2] context wipe transition failed", error);
+  performance.now() >= pendingContextSwitch.activateAtMs &&
+  !pendingContextSwitch.isActivating
+) {
+  const { nextIndex, nextSceneId } = pendingContextSwitch;
+  pendingContextSwitch.isActivating = true;
+  currentNormalSceneId = nextSceneId;
+  Promise.resolve(switchScene(nextSceneId, "context_wipe"))
+    .catch((error) => {
+      console.error("[context2] context wipe transition failed", error);
+    })
+    .then(() =>
+      onContextWipe
+        ? Promise.resolve(onContextWipe()).catch((error) => {
+            console.error("[context2] onContextWipe failed", error);
           })
-          .finally(() => {
-            enterContext(nextIndex);
-            pendingContextSwitch = null;
-          });
-      }
+        : undefined,
+    )
+    .finally(() => {
+      if (isDestroyed) return; // scene was torn down mid-rotation — don't spawn into it
+      enterContext(nextIndex);
+      pendingContextSwitch = null;
+    });
+}
+      // if (
+      //   performance.now() >= pendingContextSwitch.activateAtMs &&
+      //   !pendingContextSwitch.isActivating
+      // ) {
+      //   const { nextIndex, nextSceneId } = pendingContextSwitch;
+      //   pendingContextSwitch.isActivating = true;
+      //   currentNormalSceneId = nextSceneId;
+      //   Promise.resolve(switchScene(nextSceneId, "context_wipe"))
+      //     .catch((error) => {
+      //       console.error("[context2] context wipe transition failed", error);
+      //     })
+      //     .finally(() => {
+      //       enterContext(nextIndex);
+      //       pendingContextSwitch = null;
+      //     });
+      // }
       if (perfOptions.enabled) {
         perfStats.tickMs = performance.now() - tickStart;
       }
@@ -1505,6 +1530,7 @@ export function createFishContextMachine(options: {
   }
 
   function destroy() {
+    isDestroyed = true;
     app.ticker.remove(tick);
     clearFish();
   }
